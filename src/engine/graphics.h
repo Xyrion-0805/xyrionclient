@@ -10,6 +10,8 @@
 #include <base/color.h>
 #include <base/vmath.h>
 
+#include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -21,6 +23,15 @@
 #define GRAPHICS_TYPE_INT 0x1404
 #define GRAPHICS_TYPE_UNSIGNED_INT 0x1405
 #define GRAPHICS_TYPE_FLOAT 0x1406
+
+namespace graphics_viewport
+{
+	inline int OpenGLViewportY(int DrawableHeight, int Y, int Height)
+	{
+		const int EffectiveDrawableHeight = DrawableHeight > 0 ? DrawableHeight : Height;
+		return EffectiveDrawableHeight - Y - Height;
+	}
+}
 
 struct SBufferContainerInfo
 {
@@ -243,6 +254,9 @@ protected:
 	int m_ScreenWidth;
 	int m_ScreenHeight;
 	int m_ViewportX = 0;
+	float m_PreviewAspect = 0.0f;
+	float m_ScreenAspectOverride = 0.0f;
+	bool m_ScreenAspectOverrideEnabled = true;
 	int m_DrawableWidth;
 	int m_DrawableHeight;
 	int m_ScreenRefreshRate;
@@ -250,12 +264,144 @@ protected:
 	ivec2 m_DesktopSize;
 
 public:
+	static constexpr int MEDIA_ISLAND_SDF_MAX_ITEMS = 12;
+	static constexpr int GAUSSIAN_BLUR_MAX_RADIUS = 10;
+	static constexpr int DUAL_KAWASE_PYRAMID_LEVELS = 2;
+	enum class EBlurMode
+	{
+		GAUSSIAN = 0,
+		KAWASE = 1,
+		DUAL = 2,
+	};
+
+	struct SGaussianBlurParams
+	{
+		// The one-dimensional kernel size is m_Radius * 2 + 1 (3 through 21).
+		int m_Radius = 4;
+		float m_Sigma = 2.0f;
+		EBlurMode m_Mode = EBlurMode::GAUSSIAN;
+	};
+
+	static constexpr int DualKawasePyramidDimension(int SourceDimension, int Level)
+	{
+		if(SourceDimension <= 0 || Level < 0)
+			return 0;
+		for(int CurrentLevel = 0; CurrentLevel <= Level; ++CurrentLevel)
+			SourceDimension = (SourceDimension + 1) / 2;
+		return SourceDimension;
+	}
+
+	// 捕获与模糊通道按单采样 RT 实现的后端（如 Vulkan），在 MSAA 开启时必须整体报告不支持并回退；
+	// MSAA 计数由线程层实时维护，因此该判断可跟随运行时设置变化。
+	static constexpr bool SingleSampleFeatureAllowedUnderMsaa(bool BackendSupported, bool ExternalPassRequiresSingleSample, uint32_t MultiSamplingCount)
+	{
+		return BackendSupported && (!ExternalPassRequiresSingleSample || MultiSamplingCount == 0);
+	}
+
+	static bool CalculateGaussianBlurKernel(const SGaussianBlurParams &Params, std::array<float, GAUSSIAN_BLUR_MAX_RADIUS + 1> &aWeights);
+
+	// Fixed vec4-only layout shared by the threaded command buffer, GLSL and
+	// Vulkan std140 UBO. The shader treats this as 45 consecutive vec4 values:
+	// [0..7] are common fields, every item occupies three vec4 values and the
+	// final value maps the SDF quad to an optional backdrop texture.
+	struct SMediaIslandSdfParams
+	{
+		static constexpr int DATA_RECT = 0;
+		static constexpr int DATA_MAIN_RECT = 1;
+		static constexpr int DATA_CAPSULE_RECT = 2;
+		static constexpr int DATA_BACKGROUND = 3;
+		static constexpr int DATA_MAIN_PARAMS = 4; // radius, disabled radius, ring radius, ring thickness
+		static constexpr int DATA_METADATA = 5; // item count, corners, has capsule, screen pixel size
+		static constexpr int DATA_CAPSULE_PARAMS = 6; // radius, smooth union, unused, unused
+		static constexpr int DATA_RESERVED = 7; // outer shadow size, opacity, unused, unused
+		static constexpr int DATA_ITEM_BASE = 8;
+		static constexpr int DATA_ITEM_STRIDE = 3;
+		static constexpr int DATA_BACKDROP_UV = DATA_ITEM_BASE + MEDIA_ISLAND_SDF_MAX_ITEMS * DATA_ITEM_STRIDE;
+		static constexpr int DATA_COUNT = DATA_BACKDROP_UV + 1;
+
+		std::array<vec4, DATA_COUNT> m_aData{};
+
+		void Clear()
+		{
+			m_aData.fill(vec4(0.0f, 0.0f, 0.0f, 0.0f));
+		}
+
+		void SetItemCount(int Count)
+		{
+			m_aData[DATA_METADATA].x = (float)std::clamp(Count, 0, MEDIA_ISLAND_SDF_MAX_ITEMS);
+		}
+		int ItemCount() const { return std::clamp((int)m_aData[DATA_METADATA].x, 0, MEDIA_ISLAND_SDF_MAX_ITEMS); }
+
+		void SetMainCorners(int Corners) { m_aData[DATA_METADATA].y = (float)Corners; }
+		int MainCorners() const { return (int)m_aData[DATA_METADATA].y; }
+
+		void SetHasRightCapsule(bool HasCapsule) { m_aData[DATA_METADATA].z = HasCapsule ? 1.0f : 0.0f; }
+		bool HasRightCapsule() const { return m_aData[DATA_METADATA].z > 0.5f; }
+
+		vec4 &Item(int Index, int Field)
+		{
+			return m_aData[DATA_ITEM_BASE + std::clamp(Index, 0, MEDIA_ISLAND_SDF_MAX_ITEMS - 1) * DATA_ITEM_STRIDE + std::clamp(Field, 0, DATA_ITEM_STRIDE - 1)];
+		}
+		const vec4 &Item(int Index, int Field) const
+		{
+			return m_aData[DATA_ITEM_BASE + std::clamp(Index, 0, MEDIA_ISLAND_SDF_MAX_ITEMS - 1) * DATA_ITEM_STRIDE + std::clamp(Field, 0, DATA_ITEM_STRIDE - 1)];
+		}
+	};
+	static_assert(sizeof(vec4) == sizeof(float) * 4);
+	static_assert(sizeof(SMediaIslandSdfParams) == SMediaIslandSdfParams::DATA_COUNT * sizeof(vec4));
+
+	// A compact rounded-rectangle primitive shared by UI chrome. It intentionally
+	// remains separate from the Media Island data layout so UI controls do not
+	// inherit HUD-specific shape semantics.
+	struct SRoundedRectSdfParams
+	{
+		vec4 m_Rect{};
+		vec4 m_FillColor{};
+		vec4 m_BorderColor{};
+		// 左上、右上、右下、左下圆角半径
+		vec4 m_CornerRadii{};
+		// 边框宽度、逻辑像素大小、外部 quad padding、保留字段
+		vec4 m_Params{};
+	};
+	static_assert(sizeof(SRoundedRectSdfParams) == sizeof(vec4) * 5);
+
+
 	enum
 	{
 		TEXLOAD_TO_3D_TEXTURE = 1 << 0,
 		TEXLOAD_TO_2D_ARRAY_TEXTURE = 1 << 1,
 		TEXLOAD_NO_2D_TEXTURE = 1 << 2,
+		TEXLOAD_NO_MIPMAPS = 1 << 3,
 	};
+
+	// 不依赖纹理资源的环形扇区，半径相对于绘制框归一化。
+	struct SProceduralRingParams
+	{
+		vec4 m_Rect{};
+		ColorRGBA m_Color{};
+		float m_Rotation = 0.0f;
+		float m_RingInnerRadius = 0.0f;
+		float m_RingOuterRadius = 0.5f;
+		float m_RingStartAngle = 0.0f;
+		float m_RingEndAngle = 0.0f;
+	};
+
+	class CRenderTargetHandle
+	{
+		friend class IGraphics;
+		int m_Id;
+
+	public:
+		CRenderTargetHandle() :
+			m_Id(-1)
+		{
+		}
+
+		bool IsValid() const { return Id() >= 0; }
+		int Id() const { return m_Id; }
+		void Invalidate() { m_Id = -1; }
+	};
+
 
 	class CTextureHandle
 	{
@@ -277,7 +423,8 @@ public:
 	int ScreenWidth() const { return m_ScreenWidth; }
 	int ScreenHeight() const { return m_ScreenHeight; }
 	vec2 ScreenSize() const { return vec2(m_ScreenWidth, m_ScreenHeight); }
-	float ScreenAspect() const { return (float)ScreenWidth() / (float)ScreenHeight(); }
+	float ScreenAspect() const { return m_PreviewAspect > 0.0f ? m_PreviewAspect : (m_ScreenAspectOverrideEnabled && m_ScreenAspectOverride > 0.0f ? m_ScreenAspectOverride : (float)ScreenWidth() / (float)ScreenHeight()); }
+	float GameScreenAspect() const { return m_PreviewAspect > 0.0f ? m_PreviewAspect : (m_ScreenAspectOverride > 0.0f ? m_ScreenAspectOverride : (float)ScreenWidth() / (float)ScreenHeight()); }
 	float ScreenHiDPIScale() const { return m_ScreenHiDPIScale; }
 	int WindowWidth() const { return m_ScreenWidth / m_ScreenHiDPIScale; }
 	int WindowHeight() const { return m_ScreenHeight / m_ScreenHiDPIScale; }
@@ -326,6 +473,7 @@ public:
 	virtual void ClipDisable() = 0;
 
 	virtual void MapScreen(const CScreenRect &ScreenRect) = 0;
+	void MapScreen(float X0, float Y0, float X1, float Y1) { MapScreen(CScreenRect(vec2(X0, Y0), vec2(X1, Y1))); }
 
 	// helper functions
 	void CalcScreenParams(float Aspect, float Zoom, float *pWidth, float *pHeight) const;
@@ -335,6 +483,12 @@ public:
 	void MapScreenToSize(float Width, float Height);
 
 	virtual CScreenRect GetScreen() const = 0;
+	void GetScreen(float *pX0, float *pY0, float *pX1, float *pY1) const
+	{
+		const auto Rect = GetScreen();
+		*pX0 = Rect.m_TopLeft.x; *pY0 = Rect.m_TopLeft.y;
+		*pX1 = Rect.m_BottomRight.x; *pY1 = Rect.m_BottomRight.y;
+	}
 
 	// TODO: These should perhaps not be virtuals
 	virtual void BlendNone() = 0;
@@ -359,9 +513,49 @@ public:
 	virtual void UnloadTexture(CTextureHandle *pIndex) = 0;
 	virtual CTextureHandle LoadTextureRaw(const CImageInfo &Image, int Flags, const char *pTexName = nullptr) = 0;
 	virtual CTextureHandle LoadTextureRawMove(CImageInfo &Image, int Flags, const char *pTexName = nullptr) = 0;
+	// Update a 2D RGBA texture of the same dimensions, created without mipmaps.
+	// On success, the render thread takes ownership of the pixel allocation.
+	virtual bool UpdateTextureRawMove(CTextureHandle Texture, CImageInfo &Image) = 0;
 	virtual CTextureHandle LoadTexture(const char *pFilename, int StorageType, int Flags = 0) = 0;
 	virtual void TextureSet(CTextureHandle Texture) = 0;
 	void TextureClear() { TextureSet(CTextureHandle()); }
+
+	virtual bool IsRenderTargetSupported() const = 0;
+	virtual bool IsRenderTargetGaussianBlurSupported() const = 0;
+	virtual bool IsBackbufferCaptureSupported() const = 0;
+	virtual const char *RenderTargetSupportReason() const = 0;
+	virtual CRenderTargetHandle CreateRenderTarget(int Width, int Height) = 0;
+	virtual void DestroyRenderTarget(CRenderTargetHandle *pTarget) = 0;
+	virtual bool BeginRenderTarget(CRenderTargetHandle Target, ColorRGBA ClearColor) = 0;
+	virtual void EndRenderTarget() = 0;
+	struct SRenderTargetDrawParams
+	{
+		float m_X = 0.0f;
+		float m_Y = 0.0f;
+		float m_W = 0.0f;
+		float m_H = 0.0f;
+		float m_Alpha = 1.0f;
+		// 已合成背景的实时画面直接复制颜色，避免纹理 Alpha 再混合一次。
+		bool m_Opaque = false;
+		int m_Corners = 0;
+		float m_Rounding = 0.0f;
+		float m_U0 = 0.0f;
+		float m_V0 = 1.0f;
+		float m_U1 = 1.0f;
+		float m_V1 = 0.0f;
+	};
+	virtual void DrawRenderTarget(CRenderTargetHandle Target, const SRenderTargetDrawParams &Params) = 0;
+	// Captures all drawing submitted before this call and scales the current backbuffer
+	// into Target without a CPU readback. Must be called outside an active render target.
+	virtual bool CaptureBackbufferToRenderTarget(CRenderTargetHandle Target) = 0;
+	// Must be called outside an active render target. Gaussian and Kawase use
+	// the first same-sized temporary target. Dual Kawase uses both temporary
+	// targets as a half/quarter-resolution pyramid before reconstructing the
+	// full-sized destination.
+	virtual bool GaussianBlurRenderTarget(CRenderTargetHandle Source, const std::array<CRenderTargetHandle, DUAL_KAWASE_PYRAMID_LEVELS> &aTemporary, CRenderTargetHandle Destination, const SGaussianBlurParams &Params) = 0;
+	// 必须在非活动渲染目标状态下调用。Source 和 Destination 为完整分辨率目标，
+	// 三个中间目标必须使用相同的较小尺寸。操作依次执行降采样、模糊和升采样。
+	virtual bool DualBlurRenderTarget(CRenderTargetHandle Source, CRenderTargetHandle Downsample, CRenderTargetHandle DownsampleTemporary, CRenderTargetHandle DownsampleBlurred, CRenderTargetHandle Destination, const SGaussianBlurParams &Params) = 0;
 
 	// pTextData & pTextOutlineData are automatically free'd
 	virtual bool LoadTextTextures(size_t Width, size_t Height, CTextureHandle &TextTexture, CTextureHandle &TextOutlineTexture, uint8_t *pTextData, uint8_t *pTextOutlineData) = 0;
@@ -481,6 +675,14 @@ public:
 
 	virtual void QuadsTex3DDrawTL(const CQuadItem *pArray, int Num) = 0;
 
+	virtual void RenderMediaIslandSdf(const SMediaIslandSdfParams &Params, CRenderTargetHandle Backdrop = CRenderTargetHandle()) = 0;
+	virtual void RenderRoundedRectSdf(const SRoundedRectSdfParams &Params) = 0;
+	virtual void RenderProceduralRing(const SProceduralRingParams &Params) = 0;
+	virtual void DrawRoundedRectAntialias(float x, float y, float w, float h, float Radius, int Corners, const ColorRGBA &Color) = 0;
+	virtual bool HasRoundedRectSdf() = 0;
+	virtual bool HasMediaIslandSdf() = 0;
+	virtual bool HasProceduralRing() = 0;
+	virtual uint32_t GraphicsResourcesResetVersion() const = 0;
 	virtual int CreateQuadContainer(bool AutomaticUpload = true) = 0;
 	virtual void QuadContainerChangeAutomaticUpload(int ContainerIndex, bool AutomaticUpload) = 0;
 	virtual void QuadContainerUpload(int ContainerIndex) = 0;
@@ -545,6 +747,9 @@ public:
 	virtual void DrawRectExt4(float x, float y, float w, float h, ColorRGBA ColorTopLeft, ColorRGBA ColorTopRight, ColorRGBA ColorBottomLeft, ColorRGBA ColorBottomRight, float r, int Corners) = 0;
 	virtual int CreateRectQuadContainer(float x, float y, float w, float h, float r, int Corners) = 0;
 	virtual void DrawRect(float x, float y, float w, float h, ColorRGBA Color, int Corners, float Rounding) = 0;
+	virtual bool DrawUiGlass(float x, float y, float w, float h, ColorRGBA Color, int Corners, float Rounding) { return false; }
+	virtual void PushPreviewViewport(int X, int Y, int W, int H) {}
+	virtual void PopPreviewViewport() {}
 	virtual void DrawRect4(float x, float y, float w, float h, ColorRGBA ColorTopLeft, ColorRGBA ColorTopRight, ColorRGBA ColorBottomLeft, ColorRGBA ColorBottomRight, int Corners, float Rounding) = 0;
 	virtual void DrawCircle(float CenterX, float CenterY, float Radius, int Segments) = 0;
 
@@ -554,6 +759,18 @@ public:
 	virtual void SetColor(float r, float g, float b, float a) = 0;
 	virtual void SetColor(ColorRGBA Color) = 0;
 	virtual void SetColor2(ColorRGBA First, ColorRGBA Second) = 0;
+	struct CColorVertex
+	{
+		int m_Index;
+		float m_R, m_G, m_B, m_A;
+		CColorVertex() = default;
+		CColorVertex(int i, float r, float g, float b, float a) :
+			m_Index(i), m_R(r), m_G(g), m_B(b), m_A(a) {}
+		CColorVertex(int i, ColorRGBA Color) :
+			m_Index(i), m_R(Color.r), m_G(Color.g), m_B(Color.b), m_A(Color.a) {}
+	};
+
+	virtual void SetColorVertex(const CColorVertex *pArray, size_t Num) = 0;
 	virtual void SetColor4(ColorRGBA TopLeft, ColorRGBA TopRight, ColorRGBA BottomLeft, ColorRGBA BottomRight) = 0;
 	virtual void ChangeColorOfQuadVertices(size_t QuadOffset, unsigned char r, unsigned char g, unsigned char b, unsigned char a) = 0;
 
@@ -673,9 +890,18 @@ protected:
 		return Tex;
 	}
 
+	CRenderTargetHandle CreateRenderTargetHandle(int Index)
+	{
+		CRenderTargetHandle Target;
+		Target.m_Id = Index;
+		return Target;
+	}
+
+
 public:
 	// TClient
-	virtual void SetForcedAspect(bool Force) = 0;
+	void SetScreenAspectOverrideEnabled(bool Enabled) { m_ScreenAspectOverrideEnabled = Enabled; }
+	virtual void SetForcedAspect(bool Force, bool ApplyCustomAspect = true) = 0;
 };
 
 class IEngineGraphics : public IGraphics

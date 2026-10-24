@@ -1,5 +1,29 @@
 #include "graphics.h"
 
+bool IGraphics::CalculateGaussianBlurKernel(const SGaussianBlurParams &Params, std::array<float, GAUSSIAN_BLUR_MAX_RADIUS + 1> &aWeights)
+{
+	aWeights.fill(0.0f);
+	if(Params.m_Radius < 1 || Params.m_Radius > GAUSSIAN_BLUR_MAX_RADIUS || !std::isfinite(Params.m_Sigma) || Params.m_Sigma <= 0.0f)
+		return false;
+
+	const double SigmaSquared = (double)Params.m_Sigma * Params.m_Sigma;
+	double Sum = 0.0;
+	for(int Offset = 0; Offset <= Params.m_Radius; ++Offset)
+	{
+		const double Weight = std::exp(-(double)(Offset * Offset) / (2.0 * SigmaSquared));
+		aWeights[Offset] = (float)Weight;
+		Sum += Offset == 0 ? Weight : Weight * 2.0;
+	}
+	if(!std::isfinite(Sum) || Sum <= 0.0)
+	{
+		aWeights.fill(0.0f);
+		return false;
+	}
+	for(int Offset = 0; Offset <= Params.m_Radius; ++Offset)
+		aWeights[Offset] = (float)(aWeights[Offset] / Sum);
+	return true;
+}
+
 // helper functions
 void IGraphics::CalcScreenParams(float Aspect, float Zoom, float *pWidth, float *pHeight) const
 {

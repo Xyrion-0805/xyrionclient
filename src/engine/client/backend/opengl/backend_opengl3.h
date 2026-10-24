@@ -17,6 +17,12 @@ class CGLSLQuadProgram;
 class CGLSLSpriteMultipleProgram;
 class CGLSLTextProgram;
 
+class CGLSLMediaIslandSdfProgram;
+class CGLSLRoundedRectSdfProgram;
+class CGLSLProceduralRingProgram;
+class CGLSLGaussianBlurProgram;
+
+
 #define MAX_STREAM_BUFFER_COUNT 10
 
 // takes care of opengl 3.3+ related rendering
@@ -39,6 +45,16 @@ protected:
 	CGLSLPrimitiveExProgram *m_pPrimitiveExProgramTexturedRotationless;
 	CGLSLSpriteMultipleProgram *m_pSpriteProgramMultiple;
 
+	CGLSLMediaIslandSdfProgram *m_pMediaIslandSdfProgram;
+	bool m_MediaIslandSdfProgramValid;
+	CGLSLRoundedRectSdfProgram *m_pRoundedRectSdfProgram;
+	bool m_RoundedRectSdfProgramValid;
+	CGLSLProceduralRingProgram *m_pProceduralRingProgram;
+	bool m_ProceduralRingProgramValid;
+	CGLSLGaussianBlurProgram *m_pGaussianBlurProgram;
+	bool m_GaussianBlurProgramValid;
+
+
 	TWGLuint m_LastProgramId;
 
 	TWGLuint m_aPrimitiveDrawVertexId[MAX_STREAM_BUFFER_COUNT];
@@ -53,8 +69,18 @@ protected:
 	TWGLuint m_QuadDrawIndexBufferId;
 	unsigned int m_CurrentIndicesInBuffer;
 
+	TWGLuint m_BackbufferCaptureResolveFramebuffer = 0;
+	TWGLuint m_BackbufferCaptureResolveTexture = 0;
+	int m_BackbufferCaptureResolveWidth = 0;
+	int m_BackbufferCaptureResolveHeight = 0;
+	bool m_BackbufferCaptureMultisampleResolveSupported = false;
+
+	void BindRenderTargetTexture(TWGLuint Texture);
+
 	void DestroyBufferContainer(int Index, bool DeleteBOs = true);
 
+	void DestroyBackbufferCaptureResolveTarget();
+	bool EnsureBackbufferCaptureResolveTarget(int Width, int Height);
 	void AppendIndices(unsigned int NewIndicesCount);
 
 	struct SBufferContainer
@@ -71,6 +97,12 @@ protected:
 
 	CCommandBuffer::SColorf m_ClearColor;
 
+	void AllocateQmPrograms();
+	void LoadQmPrograms(const SCommand_Init *pCommand, class CGLSLCompiler &ShaderCompiler, int ShaderMajor, int ShaderMinor, int ShaderPatch);
+	void UnloadQmPrograms();
+	void FreeQmPrograms();
+
+
 	void InitPrimExProgram(CGLSLPrimitiveExProgram *pProgram, class CGLSLCompiler *pCompiler, class IStorage *pStorage, bool Textured, bool Rotationless);
 
 	bool IsNewApi() override { return true; }
@@ -86,12 +118,22 @@ protected:
 	void Cmd_Shutdown(const SCommand_Shutdown *pCommand) override;
 	void Cmd_Texture_Destroy(const CCommandBuffer::SCommand_Texture_Destroy *pCommand) override;
 	void Cmd_Texture_Create(const CCommandBuffer::SCommand_Texture_Create *pCommand) override;
+	void Cmd_Texture_Update(const CCommandBuffer::SCommand_Texture_Update *pCommand) override;
 	void Cmd_TextTexture_Update(const CCommandBuffer::SCommand_TextTexture_Update *pCommand) override;
 	void Cmd_TextTextures_Destroy(const CCommandBuffer::SCommand_TextTextures_Destroy *pCommand) override;
 	void Cmd_TextTextures_Create(const CCommandBuffer::SCommand_TextTextures_Create *pCommand) override;
 	void Cmd_Clear(const CCommandBuffer::SCommand_Clear *pCommand) override;
 	void Cmd_Render(const CCommandBuffer::SCommand_Render *pCommand) override;
+	void Cmd_RenderMediaIslandSdf(const CCommandBuffer::SCommand_RenderMediaIslandSdf *pCommand) override;
+	void Cmd_RenderRoundedRectSdf(const CCommandBuffer::SCommand_RenderRoundedRectSdf *pCommand) override;
+	void Cmd_RenderProceduralRing(const CCommandBuffer::SCommand_RenderProceduralRing *pCommand) override;
+
 	void Cmd_RenderTex3D(const CCommandBuffer::SCommand_RenderTex3D *pCommand) override;
+
+	void Cmd_RenderTarget_Draw(const CCommandBuffer::SCommand_RenderTarget_Draw *pCommand) override;
+	void Cmd_RenderTarget_CaptureBackbuffer(const CCommandBuffer::SCommand_RenderTarget_CaptureBackbuffer *pCommand) override;
+	void Cmd_RenderTarget_GaussianBlurPass(const CCommandBuffer::SCommand_RenderTarget_GaussianBlurPass *pCommand) override;
+
 
 	void Cmd_CreateBufferObject(const CCommandBuffer::SCommand_CreateBufferObject *pCommand) override;
 	void Cmd_RecreateBufferObject(const CCommandBuffer::SCommand_RecreateBufferObject *pCommand) override;

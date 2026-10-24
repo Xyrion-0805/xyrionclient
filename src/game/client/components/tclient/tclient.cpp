@@ -1,4 +1,4 @@
-﻿#include "tclient.h"
+#include "tclient.h"
 
 #include "data_version.h"
 
@@ -149,7 +149,7 @@ void CTClient::OnMessage(int MsgType, void *pRawMsg)
 		CNetMsg_Sv_Chat *pMsg = (CNetMsg_Sv_Chat *)pRawMsg;
 		int ClientId = pMsg->m_ClientId;
 
-		if(ClientId < 0 || ClientId > MAX_CLIENTS)
+		if(ClientId < 0 || ClientId >= MAX_CLIENTS)
 			return;
 		int LocalId = GameClient()->m_Snap.m_LocalClientId;
 		if(ClientId == LocalId)
@@ -157,7 +157,8 @@ void CTClient::OnMessage(int MsgType, void *pRawMsg)
 
 		bool PingMessage = false;
 
-		bool ValidIds = !(GameClient()->m_aLocalIds[0] < 0 || (GameClient()->Client()->DummyConnected() && GameClient()->m_aLocalIds[1] < 0));
+		bool ValidIds = GameClient()->m_aLocalIds[0] >= 0 && GameClient()->m_aLocalIds[0] < MAX_CLIENTS &&
+			(!GameClient()->Client()->DummyConnected() || (GameClient()->m_aLocalIds[1] >= 0 && GameClient()->m_aLocalIds[1] < MAX_CLIENTS));
 
 		if(ValidIds && ClientId >= 0 && ClientId != GameClient()->m_aLocalIds[0] && (!GameClient()->Client()->DummyConnected() || ClientId != GameClient()->m_aLocalIds[1]))
 		{
@@ -649,11 +650,13 @@ void CTClient::SetForcedAspect()
 		Force = false;
 	else if(State == CClient::EClientState::STATE_ONLINE && GameClient()->m_GameInfo.m_AllowZoom && !GameClient()->m_Menus.IsActive())
 		Force = false;
-	Graphics()->SetForcedAspect(Force);
+	const bool Gameplay = State == IClient::STATE_ONLINE || State == IClient::STATE_DEMOPLAYBACK;
+	Graphics()->SetForcedAspect(Force, GameClient()->m_AspectRatio.ShouldApplyCustomAspect(Gameplay));
 }
 
 void CTClient::OnStateChange(int OldState, int NewState)
 {
+	ResetGoresDrownCounts();
 	SetForcedAspect();
 	for(auto &AirRescuePositions : m_aAirRescuePositions)
 		AirRescuePositions = {};
@@ -661,6 +664,7 @@ void CTClient::OnStateChange(int OldState, int NewState)
 
 void CTClient::OnNewSnapshot()
 {
+	UpdateGoresDrownCounts();
 	SetForcedAspect();
 	// Update volleyball
 	bool IsVolleyBall = false;
@@ -867,4 +871,62 @@ void CTClient::RenderCtfFlag(vec2 Pos, float Alpha)
 	Graphics()->QuadsSetRotation(0.0f);
 	Graphics()->SetColor(1.0f, 1.0f, 1.0f, Alpha);
 	Graphics()->RenderQuadContainerAsSprite(GameClient()->m_Items.m_ItemsQuadContainerIndex, QuadOffset, Pos.x, Pos.y - Size * 0.75f);
+}
+
+
+void CTClient::ResetGoresDrownCounts()
+{
+	m_GoresDrownTracker.Reset();
+	m_GoresDrownModeActive = false;
+	m_aGoresDrownMap[0] = '\0';
+}
+
+void CTClient::UpdateGoresDrownCounts()
+{
+	if(Client()->State() != IClient::STATE_ONLINE)
+		return;
+
+	const char *pMap = GameClient()->Map()->BaseName();
+	if(pMap != nullptr && str_comp(m_aGoresDrownMap, pMap) != 0)
+	{
+		ResetGoresDrownCounts();
+		str_copy(m_aGoresDrownMap, pMap);
+	}
+
+	const bool IsGores = IsGoresDrownBoardMode();
+	if(IsGores != m_GoresDrownModeActive)
+	{
+		ResetGoresDrownCounts();
+		m_GoresDrownModeActive = IsGores;
+		if(pMap != nullptr)
+			str_copy(m_aGoresDrownMap, pMap);
+	}
+	const int LocalId = GameClient()->m_aLocalIds[g_Config.m_ClDummy] >= 0 ? GameClient()->m_aLocalIds[g_Config.m_ClDummy] : GameClient()->m_Snap.m_LocalClientId;
+	const bool HasLocalClient = LocalId >= 0 && LocalId < MAX_CLIENTS && GameClient()->m_aClients[LocalId].m_Active && GameClient()->m_Snap.m_apPlayerInfos[LocalId] != nullptr;
+	const int LocalTeam = HasLocalClient ? GameClient()->m_Teams.Team(LocalId) : -1;
+	if(!m_GoresDrownTracker.BeginSession(g_Config.m_QmGoresDrownBoard != 0, IsGores, HasLocalClient, LocalTeam))
+		return;
+
+	for(int ClientId = 0; ClientId < MAX_CLIENTS; ++ClientId)
+	{
+		const auto &Player = GameClient()->m_aClients[ClientId];
+		const auto &Character = GameClient()->m_Snap.m_aCharacters[ClientId];
+		const bool Active = Player.m_Active && GameClient()->m_Snap.m_apPlayerInfos[ClientId] != nullptr &&
+			CQmGoresDrownTracker::IsSameTrackedTeam(LocalTeam, GameClient()->m_Teams.Team(ClientId), false);
+		const bool Hooking = Character.m_Active && (Character.m_Cur.m_HookState == HOOK_FLYING || Character.m_Cur.m_HookState == HOOK_GRABBED);
+		m_GoresDrownTracker.Observe(ClientId, Active, Player.m_aName, Player.m_aClan, GameClient()->m_Teams.Team(ClientId),
+			Character.m_Active, Player.m_FreezeEnd != 0, Hooking, false);
+	}
+}
+
+bool CTClient::IsGoresDrownBoardMode() const
+{
+	// 落水榜仅采用服务器模式判定，不让手动 Gores 工具开关扩大支持范围。
+	return IsGoresGameMode();
+}
+
+bool CTClient::IsGoresGameMode() const
+{
+	const char *pGameType = GameClient()->m_GameInfo.m_aGameType;
+	return pGameType != nullptr && pGameType[0] != '\0' && str_find_nocase(pGameType, "gores") != nullptr;
 }

@@ -7,13 +7,20 @@
 #include <base/vmath.h>
 
 class IGraphics;
+class CUi;
 
 class CUIRect
 {
 	static IGraphics *ms_pGraphics;
+	static CUi *ms_pUi;
+	void DrawRectBackdrop(int Corners, float Rounding) const;
 
 public:
-	static void Init(IGraphics *pGraphics) { ms_pGraphics = pGraphics; }
+	static void Init(IGraphics *pGraphics, CUi *pUi = nullptr)
+	{
+		ms_pGraphics = pGraphics;
+		ms_pUi = pUi;
+	}
 
 	float x, y, w, h;
 
@@ -120,6 +127,7 @@ public:
 	 * @return true iff the given point is inside *this* CUIRect.
 	 */
 	bool Inside(vec2 Point) const;
+	CUIRect Intersection(const CUIRect &Other) const;
 
 	/**
 	 * Fill background of *this* CUIRect.

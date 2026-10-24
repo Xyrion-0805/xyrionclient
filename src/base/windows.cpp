@@ -1,3 +1,4 @@
+#include <algorithm>
 /* (c) Magnus Auvinen. See licence.txt in the root of the distribution for more information. */
 /* If you are missing that file, acquire a complete release at teeworlds.com.                */
 
@@ -95,6 +96,26 @@ std::optional<std::string> windows_wide_to_utf8(const wchar_t *wide_str)
 	return string;
 }
 
+std::optional<std::string> windows_wide_to_utf8_bounded(const wchar_t *wide_str, const wchar_t *wide_end)
+{
+	if(wide_str == nullptr || wide_end == nullptr || wide_str >= wide_end)
+		return {};
+
+	const wchar_t *pTerminator = std::find(wide_str, wide_end, L'\0');
+	if(pTerminator == wide_end)
+		return {};
+
+	const int Length = (int)(pTerminator - wide_str);
+	if(Length == 0)
+		return "";
+	const int SizeNeeded = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, wide_str, Length, nullptr, 0, nullptr, nullptr);
+	if(SizeNeeded == 0)
+		return {};
+	std::string String(SizeNeeded, '\0');
+	if(WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, wide_str, Length, String.data(), SizeNeeded, nullptr, nullptr) != SizeNeeded)
+		return {};
+	return String;
+}
 // See https://learn.microsoft.com/en-us/windows/win32/learnwin32/initializing-the-com-library
 CWindowsComLifecycle::CWindowsComLifecycle(bool HasWindow)
 {

@@ -3,6 +3,7 @@
 
 #include <game/client/components/background.h>
 #include <game/client/components/camera.h>
+#include <game/client/components/tclient/video_background.h>
 
 #include <array>
 #include <chrono>
@@ -74,6 +75,7 @@ public:
 
 private:
 	CCamera m_Camera;
+	CVideoBackground m_VideoBackground;
 
 	vec2 m_RotationCenter;
 	std::array<vec2, NUM_POS> m_aPositions;
@@ -99,6 +101,8 @@ public:
 
 	void OnInterfacesInit(CGameClient *pClient) override;
 	void OnInit() override;
+	void OnShutdown() override;
+	void OnStateChange(int NewState, int OldState) override;
 	void OnMapLoad() override;
 	void OnRender() override;
 
@@ -106,6 +110,8 @@ public:
 
 	bool Render();
 	bool IsLoading() const { return m_Loading; }
+	std::string GetVideoBackgroundStatus() const { return m_VideoBackground.GetStatus(); }
+	static bool IsVideoBackgroundSupported() { return CVideoBackground::IsSupported(); }
 
 	class CCamera *GetCurCamera() override;
 

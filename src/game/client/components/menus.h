@@ -16,7 +16,12 @@
 #include <engine/textrender.h>
 
 #include <game/client/component.h>
+#include <game/client/QmUi/SettingsChoice.h>
+#include <game/client/QmUi/UiContext.h>
+#include <game/client/QmUi/UiNavigation.h>
+#include <unordered_map>
 #include <game/client/components/community_icons.h>
+#include <game/client/components/bestclient/server_map_preview.h>
 #include <game/client/components/mapimages.h>
 #include <game/client/components/menus_ingame_touch_controls.h>
 #include <game/client/components/menus_settings_controls.h>
@@ -33,6 +38,23 @@
 
 class CMenus : public CComponent
 {
+
+    SUiTheme m_SettingsUiTheme;
+    using SSettingsRadioState = SSettingsChoiceState;
+    std::unordered_map<const void *, SSettingsRadioState> m_SettingsRadioStates;
+    IUiContext SettingsUiContext(const char *pScope, float UiScale);
+    IUiContext TabBarUiContext() const;
+    ui_widget::SCapsuleTabBarStyle SettingsCapsuleTabBarStyle() const;
+    ui_widget::SCapsuleTabBarStyle CapsuleTabBarStyleFor(const ColorRGBA &SurfaceColor) const;
+    float ResolveMenuTabAnimationValue(const void *pButtonId, bool Active, float DurationSec) const;
+    int DoButton_CheckBox(const void *pId, const char *pText, int Checked, const CUIRect *pRect, float BodySize);
+    int DoButton_CheckBox_Common_WithLabelElement(const void *pId, const char *pText, const char *pBoxText, const CUIRect *pRect, unsigned Flags, CUIElement *pLabelElement, bool ProcessInput, float LabelFontSize, bool MarkedControl = false);
+    int DoButton_MenuTabInternal(CButtonContainer *pButtonContainer, const char *pText, EQmIcon Icon, const char *pFallbackIcon, int Checked, const CUIRect *pRect, int Corners, SUIAnimator *pAnimator, const ColorRGBA *pDefaultColor, const ColorRGBA *pActiveColor, const ColorRGBA *pHoverColor, float EdgeRounding, const CCommunityIcon *pCommunityIcon, CUIElement *pTextUiElement, float FontSize, bool CapsuleTab);
+    int DoSegmentedChoice(CButtonContainer *pButtons, const char *const *ppLabels, int Count, int Current, const CUIRect &Segments, float Rounding, const ui_widget::SCapsuleTabBarStyle *pCapsuleStyle, float FontSize, const void *pConfigValue = nullptr, const void *pSecondConfigValue = nullptr);
+    int DoSegmentedChoiceInternal(CButtonContainer *pButtons, const char *const *ppLabels, int Count, int Current, const CUIRect &Segments, float Rounding, const ui_widget::SCapsuleTabBarStyle *pCapsuleStyle, float FontSize, const void *pConfigValue, const void *pSecondConfigValue, bool Navigation);
+    ColorHSLA DoLine_ColorPicker(CButtonContainer *pResetId, const SSettingsContentMetrics &Metrics, CUIRect *pMainRect, const char *pText, unsigned int *pColorValue, ColorRGBA DefaultColor, bool CheckBoxSpacing = true, int *pCheckBoxValue = nullptr, bool Alpha = false, bool TrailingSpacing = true);
+
+	CServerMapPreview m_ServerMapPreview;
 	static ColorRGBA ms_GuiColor;
 	static ColorRGBA ms_ColorTabbarInactiveOutgame;
 	static ColorRGBA ms_ColorTabbarActiveOutgame;
@@ -71,6 +93,128 @@ private:
 	std::optional<std::chrono::nanoseconds> m_SkinPartsList7LastRefreshTime;
 
 	int m_DirectionQuadContainerIndex;
+
+	enum
+	{
+		ASSETS_EDITOR_CAT_ENTITIES = 0,
+		ASSETS_EDITOR_CAT_GAME,
+		ASSETS_EDITOR_CAT_EMOTICONS,
+		ASSETS_EDITOR_CAT_PARTICLES,
+		ASSETS_EDITOR_CAT_HUD,
+		ASSETS_EDITOR_CAT_EXTRAS,
+		ASSETS_EDITOR_CAT_CURSOR,
+		ASSETS_EDITOR_CAT_ARROW,
+		ASSETS_EDITOR_CAT_COUNT,
+	};
+
+	enum
+	{
+		ASSETS_EDITOR_SIDE_LEFT = 0,
+		ASSETS_EDITOR_SIDE_RIGHT,
+	};
+
+	enum
+	{
+		ASSETS_EDITOR_COLOR_BLEND_TEELIKE = 0,
+		ASSETS_EDITOR_COLOR_BLEND_SCREEN,
+		ASSETS_EDITOR_COLOR_BLEND_MULTIPLY,
+		ASSETS_EDITOR_COLOR_BLEND_OVERLAY,
+		ASSETS_EDITOR_COLOR_BLEND_COUNT,
+	};
+
+	struct SAssetsEditorImage
+	{
+		int m_Category = ASSETS_EDITOR_CAT_GAME;
+		char m_aName[64] = {};
+		char m_aPath[IO_MAX_PATH_LENGTH] = {};
+		IGraphics::CTextureHandle m_Texture;
+		CImageInfo m_Image;
+		int m_Width = 0;
+		int m_Height = 0;
+	};
+
+	struct SAssetsEditorPartSlot
+	{
+		int m_SpriteId = -1;
+		int m_DstX = 0;
+		int m_DstY = 0;
+		int m_DstW = 0;
+		int m_DstH = 0;
+		int m_SrcX = 0;
+		int m_SrcY = 0;
+		int m_SrcW = 0;
+		int m_SrcH = 0;
+		char m_aFamilyKey[64] = {};
+		bool m_FromDonor = false;
+		bool m_UseCustomColor = false;
+		unsigned m_CustomColor = 65408;
+		int m_ColorBlendMode = ASSETS_EDITOR_COLOR_BLEND_TEELIKE;
+		int m_ColorOpacity = 100;
+	};
+
+	struct SAssetsEditorHoverCycle
+	{
+		int m_PositionX = -1;
+		int m_PositionY = -1;
+		int m_Cursor = 0;
+		std::vector<int> m_vCandidates;
+	};
+
+	struct SAssetsEditorState
+	{
+		bool m_Open = false;
+		bool m_Initialized = false;
+		int m_ExploreSide = -1;
+		bool m_DragActive = false;
+		int m_DraggedDonorSlot = -1;
+		bool m_DirtyPreview = true;
+		bool m_HasUnsavedChanges = false;
+		bool m_ShowExitConfirm = false;
+		char m_aExportName[64] = {};
+		char m_aStatusMessage[256] = {};
+		bool m_StatusIsError = false;
+		IGraphics::CTextureHandle m_PreviewTexture;
+		int m_PreviewWidth = 0;
+		int m_PreviewHeight = 0;
+		int m_ColorEditSlot = -1;
+		bool m_HasLastColor = false;
+		unsigned m_LastCustomColor = 65408;
+		int m_LastColorBlendMode = ASSETS_EDITOR_COLOR_BLEND_TEELIKE;
+		int m_LastColorOpacity = 100;
+		bool m_HasLastColorPopupPos = false;
+		float m_LastColorPopupX = 0.0f;
+		float m_LastColorPopupY = 0.0f;
+		SAssetsEditorImage m_Left;
+		SAssetsEditorImage m_Right;
+		std::vector<SAssetsEditorPartSlot> m_vDonorSlots;
+		std::vector<SAssetsEditorPartSlot> m_vTargetSlots;
+		SAssetsEditorHoverCycle m_DonorHover;
+		SAssetsEditorHoverCycle m_TargetHover;
+	};
+
+	SAssetsEditorState m_AssetsEditorState;
+	void RenderAssetsEditorScreen(CUIRect MainView);
+	bool AssetsEditorAssignPickedAsset(int Side, int Category, const char *pName);
+	bool AssetsEditorResolvePath(int Category, const char *pName, char *pOut, int OutSize) const;
+	bool AssetsEditorLoadImage(int Category, const char *pName, SAssetsEditorImage &Out);
+	void AssetsEditorRebuildSlots(int Side);
+	bool AssetsEditorComposeImage(CImageInfo &OutputImage);
+	bool AssetsEditorExport();
+	void AssetsEditorUpdatePreview();
+	void AssetsEditorRenderCanvas(const CUIRect &Rect, IGraphics::CTextureHandle Texture, int Width, int Height, int Category, const std::vector<SAssetsEditorPartSlot> &vSlots, int HighlightSlot, bool DropHighlight);
+	void AssetsEditorCollectHovered(const CUIRect &Rect, int Category, const std::vector<SAssetsEditorPartSlot> &vSlots, vec2 Mouse, std::vector<int> &vOut) const;
+	int AssetsEditorResolveHovered(const CUIRect &Rect, int Category, const std::vector<SAssetsEditorPartSlot> &vSlots, vec2 Mouse, bool ClickedLmb, SAssetsEditorHoverCycle &Cycle, const SAssetsEditorPartSlot *pPreferred);
+	void AssetsEditorCancelDrag();
+	void AssetsEditorRequestClose();
+	void AssetsEditorCloseNow();
+	void AssetsEditorRenderExitConfirm(const CUIRect &Rect);
+	void AssetsEditorApplyDrop(int TargetSlotIndex, int DonorSlotIndex);
+	void AssetsEditorResetSlot(int SlotIndex);
+	bool AssetsEditorCopyScaled(CImageInfo &Dst, const CImageInfo &Src, int DstX, int DstY, int DstW, int DstH, int SrcX, int SrcY, int SrcW, int SrcH) const;
+	void AssetsEditorColorize(CImageInfo &Image, int X, int Y, int W, int H, const SAssetsEditorPartSlot &Slot) const;
+	void AssetsEditorOpenColorPopup(int SlotIndex, float X, float Y);
+	void AssetsEditorClearSlotColor(int SlotIndex);
+	static CUi::EPopupMenuFunctionResult AssetsEditorPopupColorEditor(void *pContext, CUIRect View, bool Active);
 
 	// menus_settings_assets.cpp
 public:
@@ -119,6 +263,7 @@ protected:
 	std::vector<SCustomParticle> m_vParticlesList;
 	std::vector<SCustomHud> m_vHudList;
 	std::vector<SCustomExtras> m_vExtrasList;
+	std::vector<SCustomItem> m_vCursorList, m_vArrowList;
 
 	bool m_IsInit = false;
 
@@ -129,6 +274,8 @@ protected:
 	static int EmoticonsScan(const char *pName, int IsDir, int DirType, void *pUser);
 	static int ParticlesScan(const char *pName, int IsDir, int DirType, void *pUser);
 	static int HudScan(const char *pName, int IsDir, int DirType, void *pUser);
+	static int CursorScan(const char *pName, int IsDir, int DirType, void *pUser);
+	static int ArrowScan(const char *pName, int IsDir, int DirType, void *pUser);
 	static int ExtrasScan(const char *pName, int IsDir, int DirType, void *pUser);
 
 	static void ConchainAssetsEntities(IConsole::IResult *pResult, void *pUserData, IConsole::FCommandCallback pfnCallback, void *pCallbackUserData);
@@ -669,6 +816,16 @@ public:
 
 	bool IsInit() const { return m_IsInit; }
 
+
+    void RenderQmConsoleContent(CUIRect &Content, const SSettingsContentMetrics &Metrics, bool PrewarmOnly);
+    int DoButton_MenuTab(CButtonContainer *pButtonContainer, const char *pText, int Checked, const CUIRect *pRect, int Corners, SUIAnimator *pAnimator, const ColorRGBA *pDefaultColor, const ColorRGBA *pActiveColor, const ColorRGBA *pHoverColor, float EdgeRounding, const CCommunityIcon *pCommunityIcon, CUIElement *pTextUiElement, float FontSize, bool CapsuleTab);
+    bool IsSettingsPageActive() const;
+    std::array<int, 9> TooltipContext() const
+    {
+        return {m_MenuActive, m_MenuPage, m_GamePage, m_Popup, g_Config.m_UiSettingsPage,
+            g_Config.m_ClEditor, g_Config.m_QmConsoleColorScheme, Ui()->IsPopupOpen(), g_Config.m_ClDummy};
+    }
+
 	bool IsActive() const { return m_MenuActive; }
 	void SetActive(bool Active);
 
@@ -718,6 +875,8 @@ public:
 		SETTINGS_DDNET,
 		SETTINGS_ASSETS,
 		SETTINGS_TCLIENT, // TClient
+		SETTINGS_XYRION,
+		SETTINGS_MODS,
 		SETTINGS_PROFILES, // TClient
 		SETTINGS_CONFIGS, // TClient
 		SETTINGS_CREDITS,
@@ -868,6 +1027,8 @@ private:
 
 	// TClient: found in menus_tclient.cpp
 	void RenderSettingsTClient(CUIRect MainView);
+	void RenderSettingsXyrion(CUIRect MainView);
+	void RenderModsEditorWindow(CUIRect MainView);
 	void RenderSettingsTClientSettings(CUIRect MainView);
 	void RenderSettingsTClientBindWheel(CUIRect MainView);
 	void RenderSettingsTClientChatBinds(CUIRect MainView);

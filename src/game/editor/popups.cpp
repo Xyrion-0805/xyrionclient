@@ -1,3 +1,4 @@
+#include <game/editor/localization.h>
 /* (c) Magnus Auvinen. See licence.txt in the root of the distribution for more information. */
 /* If you are missing that file, acquire a complete release at teeworlds.com.                */
 
@@ -225,7 +226,7 @@ CUi::EPopupMenuFunctionResult CEditor::PopupMenuSettings(void *pContext, CUIRect
 		CUIRect No, Yes;
 		Selector.VSplitMid(&No, &Yes);
 
-		pEditor->Ui()->DoLabel(&Label, "Brush coloring", 10.0f, TEXTALIGN_ML);
+		pEditor->Ui()->DoLabel(&Label, EditorLocalize("Brush coloring"), 10.0f, TEXTALIGN_ML);
 		static int s_ButtonNo = 0;
 		static int s_ButtonYes = 0;
 		if(pEditor->DoButton_Ex(&s_ButtonNo, "No", !pEditor->m_BrushColorEnabled, &No, BUTTONFLAG_LEFT, "Disable brush coloring.", IGraphics::CORNER_L))
@@ -248,7 +249,7 @@ CUi::EPopupMenuFunctionResult CEditor::PopupMenuSettings(void *pContext, CUIRect
 		CUIRect No, Yes;
 		Selector.VSplitMid(&No, &Yes);
 
-		pEditor->Ui()->DoLabel(&Label, "Allow unused", 10.0f, TEXTALIGN_ML);
+		pEditor->Ui()->DoLabel(&Label, EditorLocalize("Allow unused"), 10.0f, TEXTALIGN_ML);
 		if(pEditor->m_AllowPlaceUnusedTiles != EUnusedEntities::ALLOWED_IMPLICIT)
 		{
 			static int s_ButtonNo = 0;
@@ -275,7 +276,7 @@ CUi::EPopupMenuFunctionResult CEditor::PopupMenuSettings(void *pContext, CUIRect
 		Selector.VSplitLeft(Selector.w / 3.0f, &Off, &Selector);
 		Selector.VSplitMid(&Dec, &Hex);
 
-		pEditor->Ui()->DoLabel(&Label, "Show info", 10.0f, TEXTALIGN_ML);
+		pEditor->Ui()->DoLabel(&Label, EditorLocalize("Show info"), 10.0f, TEXTALIGN_ML);
 		static int s_ButtonOff = 0;
 		static int s_ButtonDec = 0;
 		static int s_ButtonHex = 0;
@@ -306,7 +307,7 @@ CUi::EPopupMenuFunctionResult CEditor::PopupMenuSettings(void *pContext, CUIRect
 		CUIRect No, Yes;
 		Selector.VSplitMid(&No, &Yes);
 
-		pEditor->Ui()->DoLabel(&Label, "Preview quad envelopes", 10.0f, TEXTALIGN_ML);
+		pEditor->Ui()->DoLabel(&Label, EditorLocalize("Preview quad envelopes"), 10.0f, TEXTALIGN_ML);
 
 		static int s_ButtonNo = 0;
 		static int s_ButtonYes = 0;
@@ -332,7 +333,7 @@ CUi::EPopupMenuFunctionResult CEditor::PopupMenuSettings(void *pContext, CUIRect
 		CUIRect No, Yes;
 		Selector.VSplitMid(&No, &Yes);
 
-		pEditor->Ui()->DoLabel(&Label, "Align quads", 10.0f, TEXTALIGN_ML);
+		pEditor->Ui()->DoLabel(&Label, EditorLocalize("Align quads"), 10.0f, TEXTALIGN_ML);
 
 		static int s_ButtonNo = 0;
 		static int s_ButtonYes = 0;
@@ -356,7 +357,7 @@ CUi::EPopupMenuFunctionResult CEditor::PopupMenuSettings(void *pContext, CUIRect
 		CUIRect No, Yes;
 		Selector.VSplitMid(&No, &Yes);
 
-		pEditor->Ui()->DoLabel(&Label, "Show quads bounds", 10.0f, TEXTALIGN_ML);
+		pEditor->Ui()->DoLabel(&Label, EditorLocalize("Show quads bounds"), 10.0f, TEXTALIGN_ML);
 
 		static int s_ButtonNo = 0;
 		static int s_ButtonYes = 0;
@@ -380,7 +381,7 @@ CUi::EPopupMenuFunctionResult CEditor::PopupMenuSettings(void *pContext, CUIRect
 		CUIRect No, Yes;
 		Selector.VSplitMid(&No, &Yes);
 
-		pEditor->Ui()->DoLabel(&Label, "Auto map reload", 10.0f, TEXTALIGN_ML);
+		pEditor->Ui()->DoLabel(&Label, EditorLocalize("Auto map reload"), 10.0f, TEXTALIGN_ML);
 
 		static int s_ButtonNo = 0;
 		static int s_ButtonYes = 0;
@@ -404,7 +405,7 @@ CUi::EPopupMenuFunctionResult CEditor::PopupMenuSettings(void *pContext, CUIRect
 		CUIRect No, Yes;
 		Selector.VSplitMid(&No, &Yes);
 
-		pEditor->Ui()->DoLabel(&Label, "Select layers by tile", 10.0f, TEXTALIGN_ML);
+		pEditor->Ui()->DoLabel(&Label, EditorLocalize("Select layers by tile"), 10.0f, TEXTALIGN_ML);
 
 		static int s_ButtonNo = 0;
 		static int s_ButtonYes = 0;
@@ -428,7 +429,7 @@ CUi::EPopupMenuFunctionResult CEditor::PopupMenuSettings(void *pContext, CUIRect
 		CUIRect No, Yes;
 		Selector.VSplitMid(&No, &Yes);
 
-		pEditor->Ui()->DoLabel(&Label, "Show ingame entities", 10.0f, TEXTALIGN_ML);
+		pEditor->Ui()->DoLabel(&Label, EditorLocalize("Show ingame entities"), 10.0f, TEXTALIGN_ML);
 
 		static int s_ButtonNo = 0;
 		static int s_ButtonYes = 0;
@@ -694,7 +695,7 @@ CUi::EPopupMenuFunctionResult CEditor::PopupGroup(void *pContext, CUIRect View, 
 	{
 		View.HSplitBottom(5.0f, &View, nullptr);
 		View.HSplitBottom(12.0f, &View, &Button);
-		pEditor->Ui()->DoLabel(&Button, "Name:", 10.0f, TEXTALIGN_ML);
+		pEditor->Ui()->DoLabel(&Button, EditorLocalize("Name:"), 10.0f, TEXTALIGN_ML);
 		Button.VSplitLeft(40.0f, nullptr, &Button);
 		static CLineInput s_NameInput;
 		s_NameInput.SetBuffer(pEditor->Map()->m_vpGroups[pEditor->Map()->m_SelectedGroup]->m_aName, sizeof(pEditor->Map()->m_vpGroups[pEditor->Map()->m_SelectedGroup]->m_aName));
@@ -833,7 +834,7 @@ CUi::EPopupMenuFunctionResult CEditor::PopupLayer(void *pContext, CUIRect View, 
 		View.HSplitBottom(5.0f, &View, nullptr);
 		View.HSplitBottom(12.0f, &View, &Label);
 		Label.VSplitLeft(40.0f, &Label, &EditBox);
-		pEditor->Ui()->DoLabel(&Label, "Name:", 10.0f, TEXTALIGN_ML);
+		pEditor->Ui()->DoLabel(&Label, EditorLocalize("Name:"), 10.0f, TEXTALIGN_ML);
 		static CLineInput s_NameInput;
 		s_NameInput.SetBuffer(pCurrentLayer->m_aName, sizeof(pCurrentLayer->m_aName));
 		if(pEditor->DoEditBox(&s_NameInput, &EditBox, 10.0f))
@@ -1469,7 +1470,7 @@ CUi::EPopupMenuFunctionResult CEditor::PopupImage(void *pContext, CUIRect View, 
 		Slot.VMargin(5.0f, &Slot);
 		Slot.VSplitLeft(35.0f, &Label, &Slot);
 		Slot.VSplitLeft(RowHeight - 2.0f, nullptr, &EditBox);
-		pEditor->Ui()->DoLabel(&Label, "Name:", RowHeight - 2.0f, TEXTALIGN_ML);
+		pEditor->Ui()->DoLabel(&Label, EditorLocalize("Name:"), RowHeight - 2.0f, TEXTALIGN_ML);
 
 		s_RenameInput.SetBuffer(pImg->m_aName, sizeof(pImg->m_aName));
 		if(pEditor->DoEditBox(&s_RenameInput, &EditBox, RowHeight - 2.0f))
@@ -1610,7 +1611,7 @@ CUi::EPopupMenuFunctionResult CEditor::PopupSound(void *pContext, CUIRect View, 
 	Slot.VMargin(5.0f, &Slot);
 	Slot.VSplitLeft(35.0f, &Label, &Slot);
 	Slot.VSplitLeft(RowHeight - 2.0f, nullptr, &EditBox);
-	pEditor->Ui()->DoLabel(&Label, "Name:", RowHeight - 2.0f, TEXTALIGN_ML);
+	pEditor->Ui()->DoLabel(&Label, EditorLocalize("Name:"), RowHeight - 2.0f, TEXTALIGN_ML);
 
 	s_RenameInput.SetBuffer(pSound->m_aName, sizeof(pSound->m_aName));
 	if(pEditor->DoEditBox(&s_RenameInput, &EditBox, RowHeight - 2.0f))
@@ -1702,12 +1703,12 @@ CUi::EPopupMenuFunctionResult CEditor::PopupMapInfo(void *pContext, CUIRect View
 
 	// title
 	View.HSplitTop(20.0f, &Label, &View);
-	pEditor->Ui()->DoLabel(&Label, "Map details", 20.0f, TEXTALIGN_MC);
+	pEditor->Ui()->DoLabel(&Label, EditorLocalize("Map details"), 20.0f, TEXTALIGN_MC);
 	View.HSplitTop(10.0f, nullptr, &View);
 
 	// author box
 	View.HSplitTop(20.0f, &Label, &View);
-	pEditor->Ui()->DoLabel(&Label, "Author:", 10.0f, TEXTALIGN_ML);
+	pEditor->Ui()->DoLabel(&Label, EditorLocalize("Author:"), 10.0f, TEXTALIGN_ML);
 	Label.VSplitLeft(60.0f, nullptr, &Button);
 	Button.HMargin(3.0f, &Button);
 	static CLineInput s_AuthorInput;
@@ -1716,7 +1717,7 @@ CUi::EPopupMenuFunctionResult CEditor::PopupMapInfo(void *pContext, CUIRect View
 
 	// version box
 	View.HSplitTop(20.0f, &Label, &View);
-	pEditor->Ui()->DoLabel(&Label, "Version:", 10.0f, TEXTALIGN_ML);
+	pEditor->Ui()->DoLabel(&Label, EditorLocalize("Version:"), 10.0f, TEXTALIGN_ML);
 	Label.VSplitLeft(60.0f, nullptr, &Button);
 	Button.HMargin(3.0f, &Button);
 	static CLineInput s_VersionInput;
@@ -1725,7 +1726,7 @@ CUi::EPopupMenuFunctionResult CEditor::PopupMapInfo(void *pContext, CUIRect View
 
 	// credits box
 	View.HSplitTop(20.0f, &Label, &View);
-	pEditor->Ui()->DoLabel(&Label, "Credits:", 10.0f, TEXTALIGN_ML);
+	pEditor->Ui()->DoLabel(&Label, EditorLocalize("Credits:"), 10.0f, TEXTALIGN_ML);
 	Label.VSplitLeft(60.0f, nullptr, &Button);
 	Button.HMargin(3.0f, &Button);
 	static CLineInput s_CreditsInput;
@@ -1734,7 +1735,7 @@ CUi::EPopupMenuFunctionResult CEditor::PopupMapInfo(void *pContext, CUIRect View
 
 	// license box
 	View.HSplitTop(20.0f, &Label, &View);
-	pEditor->Ui()->DoLabel(&Label, "License:", 10.0f, TEXTALIGN_ML);
+	pEditor->Ui()->DoLabel(&Label, EditorLocalize("License:"), 10.0f, TEXTALIGN_ML);
 	Label.VSplitLeft(60.0f, nullptr, &Button);
 	Button.HMargin(3.0f, &Button);
 	static CLineInput s_LicenseInput;
@@ -2800,7 +2801,7 @@ CUi::EPopupMenuFunctionResult CEditor::PopupAnimateSettings(void *pContext, CUIR
 	Row.VSplitLeft(10.0f, &ButtonDecrease, &Row);
 	Row.VSplitRight(10.0f, &EditBox, &ButtonIncrease);
 	View.HSplitBottom(12.0f, &View, &ButtonReset);
-	pEditor->Ui()->DoLabel(&Label, "Speed", 10.0f, TEXTALIGN_ML);
+	pEditor->Ui()->DoLabel(&Label, EditorLocalize("Speed"), 10.0f, TEXTALIGN_ML);
 
 	const float OldAnimateSpeed = EnvelopeEvaluator.m_AnimateSpeed;
 

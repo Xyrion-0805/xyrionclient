@@ -124,6 +124,8 @@ public:
 	{
 		CONN_MAIN = 0,
 		CONN_DUMMY,
+		CONN_DUMMY2,
+		CONN_DUMMY3,
 		CONN_CONTACT,
 		NUM_CONNS,
 	};
@@ -222,6 +224,12 @@ public:
 	virtual bool DummyConnected() const = 0;
 	virtual bool DummyConnecting() const = 0;
 	virtual bool DummyConnectingDelayed() const = 0;
+	virtual int DummyConnectedCount() const = 0;
+	virtual int DummyConnectionLimit() const = 0;
+	virtual bool DummyIsConnected(int Number) const = 0;
+	virtual int DummySelected() const = 0;
+	virtual void DummySelect(int Number) = 0;
+	virtual void DummyDisconnectNumber(int Number) = 0;
 	virtual bool DummyAllowed() const = 0;
 
 	virtual void Restart() = 0;
@@ -439,6 +447,7 @@ public:
 	virtual const char *DDNetVersionStr() const = 0;
 
 	virtual void OnDummyDisconnect() = 0;
+	virtual void OnDummyChange(const int *pInput) = 0;
 	virtual void DummyResetInput() = 0;
 	virtual void Echo(const char *pString) = 0;
 

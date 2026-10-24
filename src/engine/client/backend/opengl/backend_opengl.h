@@ -57,6 +57,21 @@ protected:
 	// the origin of the drawable area when the viewport is clamped.
 	int m_ViewportX = 0;
 	int m_ViewportY = 0;
+	struct SOpenGLRenderTarget
+	{
+		TWGLuint m_Framebuffer = 0;
+		TWGLuint m_Texture = 0;
+		int m_Width = 0;
+		int m_Height = 0;
+	};
+	std::vector<SOpenGLRenderTarget> m_vRenderTargets;
+	TWGLint m_aRenderTargetPreviousViewport[4] = {0, 0, 0, 0};
+	TWGLint m_RenderTargetPreviousFramebuffer = 0;
+	float m_aRenderTargetPreviousClearColor[4] = {};
+	bool m_RenderTargetActive = false;
+	int m_ActiveRenderTargetId = -1;
+
+
 	uint32_t m_CanvasWidth = 0;
 	uint32_t m_CanvasHeight = 0;
 	bool m_HasDisplayCutout = false;
@@ -81,7 +96,15 @@ protected:
 	bool IsTexturedState(const CCommandBuffer::SState &State);
 
 	bool InitOpenGL(const SCommand_Init *pCommand);
+	IStorage *m_pUiGlassStorage = nullptr;
+	TWGLuint m_UiGlassProgram = 0, m_UiGlassTexture = 0, m_UiGlassVao = 0, m_UiGlassVbo = 0;
+	int m_UiGlassW = 0, m_UiGlassH = 0;
+	uint64_t m_UiGlassFrame = UINT64_MAX;
+	bool m_UiGlassFailed = false;
+	void Cmd_UiGlass(const CCommandBuffer::SCommand_UiGlass *pCommand);
+	void ShutdownUiGlass();
 
+	void SetClipRect(const CCommandBuffer::SState &State);
 	void SetState(const CCommandBuffer::SState &State, bool Use2DArrayTexture = false);
 	virtual bool IsNewApi() { return false; }
 	void DestroyTexture(int Slot);
@@ -97,16 +120,32 @@ protected:
 	virtual void Cmd_Shutdown(const SCommand_Shutdown *pCommand) {}
 	virtual void Cmd_Texture_Destroy(const CCommandBuffer::SCommand_Texture_Destroy *pCommand);
 	virtual void Cmd_Texture_Create(const CCommandBuffer::SCommand_Texture_Create *pCommand);
+	virtual void Cmd_Texture_Update(const CCommandBuffer::SCommand_Texture_Update *pCommand);
 	virtual void Cmd_TextTexture_Update(const CCommandBuffer::SCommand_TextTexture_Update *pCommand);
 	virtual void Cmd_TextTextures_Destroy(const CCommandBuffer::SCommand_TextTextures_Destroy *pCommand);
 	virtual void Cmd_TextTextures_Create(const CCommandBuffer::SCommand_TextTextures_Create *pCommand);
 	virtual void Cmd_Clear(const CCommandBuffer::SCommand_Clear *pCommand);
 	virtual void Cmd_Render(const CCommandBuffer::SCommand_Render *pCommand);
+	virtual void Cmd_RenderMediaIslandSdf(const CCommandBuffer::SCommand_RenderMediaIslandSdf *pCommand) {}
+	virtual void Cmd_RenderRoundedRectSdf(const CCommandBuffer::SCommand_RenderRoundedRectSdf *pCommand) {}
+	virtual void Cmd_RenderProceduralRing(const CCommandBuffer::SCommand_RenderProceduralRing *pCommand) {}
+
 	virtual void Cmd_RenderTex3D(const CCommandBuffer::SCommand_RenderTex3D *pCommand) { dbg_assert_failed("Call of unsupported Cmd_RenderTex3D"); }
+
+
+	virtual void Cmd_RenderTarget_Create(const CCommandBuffer::SCommand_RenderTarget_Create *pCommand);
+	virtual void Cmd_RenderTarget_Destroy(const CCommandBuffer::SCommand_RenderTarget_Destroy *pCommand);
+	virtual void Cmd_RenderTarget_Begin(const CCommandBuffer::SCommand_RenderTarget_Begin *pCommand);
+	virtual void Cmd_RenderTarget_End(const CCommandBuffer::SCommand_RenderTarget_End *pCommand);
+	virtual void Cmd_RenderTarget_Draw(const CCommandBuffer::SCommand_RenderTarget_Draw *pCommand);
+	virtual void Cmd_RenderTarget_CaptureBackbuffer(const CCommandBuffer::SCommand_RenderTarget_CaptureBackbuffer *pCommand) {}
+	virtual void Cmd_RenderTarget_GaussianBlurPass(const CCommandBuffer::SCommand_RenderTarget_GaussianBlurPass *pCommand) {}
+	virtual void Cmd_RenderTarget_Readback(const CCommandBuffer::SCommand_RenderTarget_Readback *pCommand);
 	virtual void Cmd_ReadPixel(const CCommandBuffer::SCommand_TrySwapAndReadPixel *pCommand);
 	virtual void Cmd_Screenshot(const CCommandBuffer::SCommand_TrySwapAndScreenshot *pCommand);
 
 	virtual void Cmd_Update_Viewport(const CCommandBuffer::SCommand_Update_Viewport *pCommand);
+
 
 	virtual void Cmd_CreateBufferObject(const CCommandBuffer::SCommand_CreateBufferObject *pCommand) { dbg_assert_failed("Call of unsupported Cmd_CreateBufferObject"); }
 	virtual void Cmd_RecreateBufferObject(const CCommandBuffer::SCommand_RecreateBufferObject *pCommand) { dbg_assert_failed("Call of unsupported Cmd_RecreateBufferObject"); }

@@ -104,3 +104,11 @@ void CBackground::OnRender()
 
 	CMapLayers::OnRender();
 }
+
+bool CBackground::RenderCustom(vec2 Center, float Zoom)
+{
+	if(!m_Loaded || (Client()->State() != IClient::STATE_ONLINE && Client()->State() != IClient::STATE_DEMOPLAYBACK) || g_Config.m_ClOverlayEntities != 100)
+		return false;
+	CMapLayers::RenderCustom(Center, Zoom);
+	return true;
+}

@@ -39,6 +39,7 @@ public:
 	int m_aInputDirectionLeft[NUM_DUMMIES];
 	int m_aInputDirectionRight[NUM_DUMMIES];
 	int m_aShowHookColl[NUM_DUMMIES];
+	int m_aShowWeaponTrajectory[NUM_DUMMIES] = {};
 
 	// TClient
 	CNetObj_PlayerInput m_aFastInput[NUM_DUMMIES];

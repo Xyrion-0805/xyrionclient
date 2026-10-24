@@ -1,3 +1,4 @@
+#include <game/editor/localization.h>
 /* (c) Magnus Auvinen. See licence.txt in the root of the distribution for more information. */
 /* If you are missing that file, acquire a complete release at teeworlds.com.                */
 
@@ -328,7 +329,7 @@ void CEnvelopeEditor::Render(CUIRect View)
 		{
 			ToolBar.VSplitLeft(15.0f, nullptr, &ToolBar);
 			ToolBar.VSplitLeft(40.0f, &Button, &ToolBar);
-			Ui()->DoLabel(&Button, "Name:", 10.0f, TEXTALIGN_MR);
+			Ui()->DoLabel(&Button, EditorLocalize("Name:"), 10.0f, TEXTALIGN_MR);
 
 			ToolBar.VSplitLeft(3.0f, nullptr, &ToolBar);
 			ToolBar.VSplitLeft(ToolBar.w > ToolBar.h * 40 ? 80.0f : 60.0f, &Button, &ToolBar);
@@ -1813,7 +1814,7 @@ CUi::EPopupMenuFunctionResult CEnvelopeEditor::CPopupEnvelopePoint::Render(void 
 		View.HSplitTop(4.0f, nullptr, &View);
 		Row.VSplitLeft(60.0f, &Label, &Row);
 		Row.VSplitLeft(10.0f, nullptr, &EditBox);
-		pEditor->Ui()->DoLabel(&Label, "Color:", RowHeight - 2.0f, TEXTALIGN_ML);
+		pEditor->Ui()->DoLabel(&Label, EditorLocalize("Color:"), RowHeight - 2.0f, TEXTALIGN_ML);
 
 		const auto SelectedPoint = pMap->m_vSelectedEnvelopePoints.front();
 		const int SelectedIndex = SelectedPoint.first;
@@ -1868,14 +1869,14 @@ CUi::EPopupMenuFunctionResult CEnvelopeEditor::CPopupEnvelopePoint::Render(void 
 	View.HSplitTop(RowHeight, &Row, &View);
 	Row.VSplitLeft(60.0f, &Label, &Row);
 	Row.VSplitLeft(10.0f, nullptr, &EditBox);
-	pEditor->Ui()->DoLabel(&Label, "Value:", RowHeight - 2.0f, TEXTALIGN_ML);
+	pEditor->Ui()->DoLabel(&Label, EditorLocalize("Value:"), RowHeight - 2.0f, TEXTALIGN_ML);
 	pEditor->DoEditBox(&pPopupEnvelopePointContext->m_ValueInput, &EditBox, RowHeight - 2.0f, IGraphics::CORNER_ALL, "The value of the selected envelope point.");
 
 	View.HSplitTop(4.0f, nullptr, &View);
 	View.HSplitTop(RowHeight, &Row, &View);
 	Row.VSplitLeft(60.0f, &Label, &Row);
 	Row.VSplitLeft(10.0f, nullptr, &EditBox);
-	pEditor->Ui()->DoLabel(&Label, "Time (in s):", RowHeight - 2.0f, TEXTALIGN_ML);
+	pEditor->Ui()->DoLabel(&Label, EditorLocalize("Time (in s):"), RowHeight - 2.0f, TEXTALIGN_ML);
 	pEditor->DoEditBox(&pPopupEnvelopePointContext->m_TimeInput, &EditBox, RowHeight - 2.0f, IGraphics::CORNER_ALL, "The time of the selected envelope point.");
 
 	if(pEditor->Input()->KeyIsPressed(KEY_RETURN) || pEditor->Input()->KeyIsPressed(KEY_KP_ENTER))

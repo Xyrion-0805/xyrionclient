@@ -1,17 +1,24 @@
 /* (c) Magnus Auvinen. See licence.txt in the root of the distribution for more information. */
 /* If you are missing that file, acquire a complete release at teeworlds.com.                */
 #include "lineinput.h"
+#include <base/str.h>
+#include <base/mem.h>
+#include <base/time.h>
+#include <base/dbg.h>
 
+#include "QmUi/QmTheme.h"
 #include "ui.h"
 
-#include <base/dbg.h>
-#include <base/mem.h>
-#include <base/str.h>
-
 #include <engine/external/tinyexpr.h>
-#include <engine/graphics.h>
 #include <engine/keys.h>
 #include <engine/shared/config.h>
+#include <engine/shared/qm_ime_policy.h>
+
+#include <algorithm>
+#include <chrono>
+#include <cmath>
+
+using namespace std::chrono_literals;
 
 IInput *CLineInput::ms_pInput = nullptr;
 ITextRender *CLineInput::ms_pTextRender = nullptr;
@@ -20,6 +27,7 @@ IClient *CLineInput::ms_pClient = nullptr;
 
 CLineInput *CLineInput::ms_pActiveInput = nullptr;
 EInputPriority CLineInput::ms_ActiveInputPriority = EInputPriority::NONE;
+bool CLineInput::ms_TextInputAutoManaged = false;
 
 vec2 CLineInput::ms_CompositionWindowPosition = vec2(0.0f, 0.0f);
 float CLineInput::ms_CompositionLineHeight = 0.0f;
@@ -34,6 +42,7 @@ void CLineInput::SetBuffer(char *pStr, size_t MaxSize, size_t MaxChars)
 	m_pStr = pStr;
 	m_MaxSize = MaxSize;
 	m_MaxChars = MaxChars;
+	m_InputMotion.Reset();
 	m_WasChanged = m_pStr && pLastStr && m_WasChanged;
 	m_WasCursorChanged = m_pStr && pLastStr && m_WasCursorChanged;
 	if(!pLastStr)
@@ -41,6 +50,7 @@ void CLineInput::SetBuffer(char *pStr, size_t MaxSize, size_t MaxChars)
 		m_CursorPos = m_SelectionStart = m_SelectionEnd = m_LastCompositionCursorPos = 0;
 		m_ScrollOffset = m_ScrollOffsetChange = 0.0f;
 		m_CaretPosition = vec2(0.0f, 0.0f);
+		m_CaretBlinkStartTime = std::chrono::nanoseconds::zero();
 		m_MouseSelection.m_Selecting = false;
 		m_Hidden = false;
 		m_pEmptyText = nullptr;
@@ -85,7 +95,9 @@ void CLineInput::SetRange(const char *pString, size_t Begin, size_t End)
 			mem_move(m_pStr + Begin + AddedCharSize, m_pStr + Begin + RemovedCharSize, m_Len - Begin - AddedCharSize);
 		}
 		else if(AddedCharSize > RemovedCharSize)
+		{
 			mem_move(m_pStr + End + AddedCharSize - RemovedCharSize, m_pStr + End, m_Len - End);
+		}
 
 		if(AddedCharSize >= RemovedCharSize)
 			mem_copy(m_pStr + Begin, pString, AddedCharSize);
@@ -206,12 +218,20 @@ bool CLineInput::ProcessInput(const IInput::CEvent &Event)
 
 	if(Event.m_Flags & IInput::FLAG_TEXT)
 	{
-		SetRange(Event.m_aText, m_SelectionStart, m_SelectionEnd);
+		if(QmImeTextEventShouldMutateBuffer(Event.m_aText))
+		{
+			SetRange(Event.m_aText, m_SelectionStart, m_SelectionEnd);
+		}
 		KeyHandled = true;
 	}
 
 	if(Event.m_Flags & IInput::FLAG_PRESS)
 	{
+		// 输入法处于组合输入状态时，退格、删除、导航与回车由 IME 内部消费，避免误删现有文本或移位光标。
+		if(Input()->HasComposition() && QmImeKeyConsumedByComposition(Event.m_Key))
+		{
+			return true;
+		}
 		const bool ModPressed = Input()->ModifierIsPressed();
 		const bool AltPressed = Input()->AltIsPressed();
 
@@ -323,7 +343,9 @@ bool CLineInput::ProcessInput(const IInput::CEvent &Event)
 					m_SelectionEnd = m_SelectionStart;
 			}
 			else
+			{
 				m_SelectionEnd = 0;
+			}
 			m_CursorPos = 0;
 			m_SelectionStart = 0;
 			KeyHandled = true;
@@ -336,7 +358,9 @@ bool CLineInput::ProcessInput(const IInput::CEvent &Event)
 					m_SelectionStart = m_SelectionEnd;
 			}
 			else
+			{
 				m_SelectionStart = m_Len;
+			}
 			m_CursorPos = m_Len;
 			m_SelectionEnd = m_Len;
 			KeyHandled = true;
@@ -415,24 +439,43 @@ bool CLineInput::ProcessInput(const IInput::CEvent &Event)
 	return KeyHandled;
 }
 
-STextBoundingBox CLineInput::Render(const CUIRect *pRect, float FontSize, int Align, bool Changed, float LineWidth, float LineSpacing, const std::vector<STextColorSplit> &vColorSplits)
+STextBoundingBox CLineInput::Render(const CUIRect *pRect, float FontSize, int Align, bool Changed, float LineWidth, float LineSpacing, const std::vector<STextColorSplit> &vColorSplits, ERenderMode Mode)
 {
+	const bool Draw = Mode == ERenderMode::DRAW;
+	const ColorRGBA PreviousTextColor = TextRender()->GetTextColor();
+	const ColorRGBA PreviousTextOutlineColor = TextRender()->GetTextOutlineColor();
+	const ColorRGBA PreviousTextSelectionColor = TextRender()->GetTextSelectionColor();
+	const unsigned PreviousRenderFlags = TextRender()->GetRenderFlags();
+	const EFontPreset PreviousFontPreset = TextRender()->GetFontPreset();
+
 	// update derived attributes to handle external changes to the buffer
 	UpdateStrData();
 
-	m_WasRendered = true;
+	if(Draw)
+		m_WasRendered = true;
 
 	const char *pDisplayStr = GetDisplayedString();
 	const bool HasComposition = Input()->HasComposition();
 
-	if(pDisplayStr[0] == '\0' && !HasComposition && m_pEmptyText != nullptr)
+	// IME 状态是全局的，只有当前输入框有组合文本时才隐藏它自己的提示文本。
+	const bool HasVisibleComposition = IsActive() && HasComposition && Input()->GetCompositionLength() > 0;
+	const bool IsPlaceholder = pDisplayStr[0] == '\0' && !HasVisibleComposition && m_pEmptyText != nullptr;
+	if(IsPlaceholder)
 	{
 		pDisplayStr = m_pEmptyText;
 		m_MouseSelection.m_Selecting = false;
-		TextRender()->TextColor(1.0f, 1.0f, 1.0f, 0.75f);
+		ColorRGBA PlaceholderColor = PreviousTextColor;
+		PlaceholderColor.a *= 0.75f;
+		TextRender()->TextColor(PlaceholderColor);
 	}
 
 	CTextCursor Cursor;
+	if(!Draw)
+		Cursor.m_Flags &= ~TEXTFLAG_RENDER;
+	// 光标和选区都不进入文本容器。选区先通过无渲染预遍历计算并绘制，
+	// 再绘制文字，避免全选覆盖文字或污染后续 UI 文本的容器命令。
+	Cursor.m_RenderCursor = false;
+	Cursor.m_RenderSelection = false;
 	if(IsActive())
 	{
 		const size_t CursorOffset = GetCursorOffset();
@@ -448,9 +491,16 @@ STextBoundingBox CLineInput::Render(const CUIRect *pRect, float FontSize, int Al
 			DisplayStrBuffer = DisplayStr.substr(0, DisplayCursorOffset) + Input()->GetComposition() + DisplayStr.substr(DisplayCursorOffset);
 			pDisplayStr = DisplayStrBuffer.c_str();
 		}
+		if(Draw)
+			m_InputMotion.Update(pDisplayStr, time_get_nanoseconds(), g_Config.m_QmUiMotionLevel,
+				!IsPlaceholder && !IsHidden() && !m_MouseSelection.m_Selecting && (HasComposition || !HasSelection()));
 
 		const STextBoundingBox BoundingBox = TextRender()->TextBoundingBox(FontSize, pDisplayStr, -1, LineWidth, LineSpacing);
-		const vec2 CursorPos = CUi::CalcAlignedCursorPos(pRect, BoundingBox.Size(), Align);
+		// 单行时按可见字形高度做视觉垂直居中，与 DoLabel(TEXTALIGN_M?) 的观感一致；
+		// 整行框含字体上伸/下伸空白，直接按框居中会让数字等无下伸字形看起来偏上。
+		// 多行或无字形数据（空文本/IME 组合中）时退回整行框居中。
+		const float *pBiggestCharHeight = BoundingBox.m_LineCount == 1 && BoundingBox.m_MaxCharacterHeight > 0.0f ? &BoundingBox.m_MaxCharacterHeight : nullptr;
+		const vec2 CursorPos = CUi::CalcAlignedCursorPos(pRect, BoundingBox.Size(), Align, pBiggestCharHeight);
 
 		Cursor.SetPosition(CursorPos);
 		Cursor.m_FontSize = FontSize;
@@ -474,6 +524,39 @@ STextBoundingBox CLineInput::Render(const CUIRect *pRect, float FontSize, int Al
 			Cursor.m_ReleaseMouse.y = m_MouseSelection.m_ReleaseMouse.y;
 		}
 
+		auto RenderTextWithSelectionUnderlay = [&]() {
+			if(Cursor.m_CalculateSelectionMode != TEXT_CURSOR_SELECTION_MODE_NONE)
+			{
+				CTextCursor SelectionCursor = Cursor;
+				SelectionCursor.m_Flags &= ~TEXTFLAG_RENDER;
+				SelectionCursor.m_RenderCursor = false;
+				SelectionCursor.m_RenderSelection = false;
+				TextRender()->TextEx(&SelectionCursor, pDisplayStr);
+
+				if(SelectionCursor.m_CursorMode == TEXT_CURSOR_CURSOR_MODE_CALCULATE && SelectionCursor.m_CursorCharacter >= 0)
+				{
+					const size_t NewCursorOffset = str_utf8_offset_chars_to_bytes(pDisplayStr, SelectionCursor.m_CursorCharacter);
+					SetCursorOffset(OffsetFromDisplayToActual(NewCursorOffset));
+				}
+				if(SelectionCursor.m_CalculateSelectionMode == TEXT_CURSOR_SELECTION_MODE_CALCULATE && SelectionCursor.m_SelectionStart >= 0 && SelectionCursor.m_SelectionEnd >= 0)
+				{
+					const size_t NewSelectionStart = str_utf8_offset_chars_to_bytes(pDisplayStr, SelectionCursor.m_SelectionStart);
+					const size_t NewSelectionEnd = str_utf8_offset_chars_to_bytes(pDisplayStr, SelectionCursor.m_SelectionEnd);
+					SetSelection(OffsetFromDisplayToActual(NewSelectionStart), OffsetFromDisplayToActual(NewSelectionEnd));
+				}
+
+				if(Draw)
+					RenderSelection(SelectionCursor, TextRender()->GetTextSelectionColor());
+				Cursor.m_CursorMode = TEXT_CURSOR_CURSOR_MODE_SET;
+				Cursor.m_CursorCharacter = SelectionCursor.m_CursorCharacter;
+				Cursor.m_CalculateSelectionMode = TEXT_CURSOR_SELECTION_MODE_NONE;
+			}
+			// 缩放仅进入主文字绘制，选区预遍历和实际光标仍使用原排版。
+			if(Draw)
+				m_InputMotion.FillCharOffsets(Cursor.m_vCharOffsets);
+			TextRender()->TextEx(&Cursor, pDisplayStr);
+		};
+
 		if(HasComposition)
 		{
 			// We need to track the last composition cursor position separately, because the composition
@@ -487,9 +570,9 @@ STextBoundingBox CLineInput::Render(const CUIRect *pRect, float FontSize, int Al
 			Cursor.m_SelectionHeightFactor = 0.1f;
 			Cursor.m_SelectionStart = str_utf8_offset_bytes_to_chars(pDisplayStr, DisplayCursorOffset);
 			Cursor.m_SelectionEnd = str_utf8_offset_bytes_to_chars(pDisplayStr, DisplayCompositionEnd);
-			TextRender()->TextSelectionColor(1.0f, 1.0f, 1.0f, 0.8f);
-			TextRender()->TextEx(&Cursor, pDisplayStr);
-			TextRender()->TextSelectionColor(TextRender()->DefaultTextSelectionColor());
+			TextRender()->TextSelectionColor(qm_theme::IME.m_CompositionSelection);
+			RenderTextWithSelectionUnderlay();
+			TextRender()->TextSelectionColor(PreviousTextSelectionColor);
 		}
 		else if(GetSelectionLength())
 		{
@@ -500,14 +583,14 @@ STextBoundingBox CLineInput::Render(const CUIRect *pRect, float FontSize, int Al
 			Cursor.m_CalculateSelectionMode = m_MouseSelection.m_Selecting ? TEXT_CURSOR_SELECTION_MODE_CALCULATE : TEXT_CURSOR_SELECTION_MODE_SET;
 			Cursor.m_SelectionStart = str_utf8_offset_bytes_to_chars(pDisplayStr, Start);
 			Cursor.m_SelectionEnd = str_utf8_offset_bytes_to_chars(pDisplayStr, End);
-			TextRender()->TextEx(&Cursor, pDisplayStr);
+			RenderTextWithSelectionUnderlay();
 		}
 		else
 		{
 			Cursor.m_CursorMode = m_MouseSelection.m_Selecting ? TEXT_CURSOR_CURSOR_MODE_CALCULATE : TEXT_CURSOR_CURSOR_MODE_SET;
 			Cursor.m_CursorCharacter = str_utf8_offset_bytes_to_chars(pDisplayStr, CaretOffset);
 			Cursor.m_CalculateSelectionMode = m_MouseSelection.m_Selecting ? TEXT_CURSOR_SELECTION_MODE_CALCULATE : TEXT_CURSOR_SELECTION_MODE_NONE;
-			TextRender()->TextEx(&Cursor, pDisplayStr);
+			RenderTextWithSelectionUnderlay();
 		}
 
 		if(Cursor.m_CursorMode == TEXT_CURSOR_CURSOR_MODE_CALCULATE && Cursor.m_CursorCharacter >= 0)
@@ -522,23 +605,27 @@ STextBoundingBox CLineInput::Render(const CUIRect *pRect, float FontSize, int Al
 			SetSelection(OffsetFromDisplayToActual(NewSelectionStart), OffsetFromDisplayToActual(NewSelectionEnd));
 		}
 
-		m_CaretPosition = Cursor.m_CursorRenderedPosition;
-
-		CTextCursor CaretCursor;
-		CaretCursor.SetPosition(CursorPos);
-		CaretCursor.m_FontSize = FontSize;
-		CaretCursor.m_Flags = 0;
-		CaretCursor.m_LineWidth = LineWidth;
-		CaretCursor.m_LineSpacing = LineSpacing;
-		CaretCursor.m_CursorMode = TEXT_CURSOR_CURSOR_MODE_SET;
-		CaretCursor.m_CursorCharacter = str_utf8_offset_bytes_to_chars(pDisplayStr, DisplayCursorOffset);
-		TextRender()->TextEx(&CaretCursor, pDisplayStr);
-		SetCompositionWindowPosition(CaretCursor.m_CursorRenderedPosition + vec2(0.0f, CaretCursor.m_AlignedFontSize / 2.0f), CaretCursor.m_AlignedFontSize);
+		if(Cursor.m_HasCursorRenderedPosition)
+		{
+			m_CaretPosition = Cursor.m_CursorRenderedPosition;
+			// INPUT 消费编辑通知后，DRAW 仍应从可见光标周期开始。
+			if(!Draw && Cursor.m_ForceCursorRendering)
+				m_CaretBlinkStartTime = time_get_nanoseconds();
+			if(Draw)
+				RenderCaret(Cursor, Cursor.m_ForceCursorRendering, TextRender()->GetTextColor(), TextRender()->GetTextOutlineColor());
+			// 主 Cursor 已完成文本、选择区、光标和 IME 锚点位置计算，不能再创建一套
+			// 重复文字容器。第二次 TextEx 会为同一输入额外插入图形命令，并在 caret
+			// 闪烁边界与主容器交错。
+			if(Draw)
+				SetCompositionWindowPosition(m_CaretPosition + vec2(0.0f, Cursor.m_AlignedFontSize / 2.0f), Cursor.m_AlignedFontSize);
+		}
 	}
 	else
 	{
 		const STextBoundingBox BoundingBox = TextRender()->TextBoundingBox(FontSize, pDisplayStr, -1, LineWidth, LineSpacing);
-		Cursor.SetPosition(CUi::CalcAlignedCursorPos(pRect, BoundingBox.Size(), Align));
+		// 与激活态一致：单行按可见字形高度视觉居中，多行/无字形数据退回整行框居中。
+		const float *pBiggestCharHeight = BoundingBox.m_LineCount == 1 && BoundingBox.m_MaxCharacterHeight > 0.0f ? &BoundingBox.m_MaxCharacterHeight : nullptr;
+		Cursor.SetPosition(CUi::CalcAlignedCursorPos(pRect, BoundingBox.Size(), Align, pBiggestCharHeight));
 		Cursor.m_FontSize = FontSize;
 		Cursor.m_LineWidth = LineWidth;
 		Cursor.m_LineSpacing = LineSpacing;
@@ -546,83 +633,148 @@ STextBoundingBox CLineInput::Render(const CUIRect *pRect, float FontSize, int Al
 		TextRender()->TextEx(&Cursor, pDisplayStr);
 	}
 
-	TextRender()->TextColor(TextRender()->DefaultTextColor());
+	TextRender()->SetRenderFlags(PreviousRenderFlags);
+	TextRender()->SetFontPreset(PreviousFontPreset);
+	TextRender()->TextOutlineColor(PreviousTextOutlineColor);
+	TextRender()->TextSelectionColor(PreviousTextSelectionColor);
+	TextRender()->TextColor(PreviousTextColor);
 
 	return Cursor.BoundingBox();
 }
 
-void CLineInput::RenderCandidates()
+void CLineInput::RenderSelection(const CTextCursor &Cursor, ColorRGBA SelectionColor)
+{
+	if(Cursor.m_vSelectionQuads.empty())
+		return;
+
+	Graphics()->TextureClear();
+	Graphics()->QuadsBegin();
+	Graphics()->SetColor(SelectionColor);
+	Graphics()->QuadsDrawTL(Cursor.m_vSelectionQuads.data(), Cursor.m_vSelectionQuads.size());
+	Graphics()->QuadsEnd();
+	Graphics()->SetColor(1.0f, 1.0f, 1.0f, 1.0f);
+}
+
+void CLineInput::RenderCaret(const CTextCursor &Cursor, bool ForceVisible, ColorRGBA TextColor, ColorRGBA TextOutlineColor)
+{
+	if(m_HideCursor)
+		return;
+	if(!Cursor.m_HasCursorRenderedPosition)
+		return;
+	const vec2 DrawPosition = m_InputMotion.ResolveCaret(Cursor.m_CursorRenderedPosition, Cursor.m_AlignedFontSize,
+		m_MouseSelection.m_Selecting || (!Input()->HasComposition() && HasSelection()) || m_ScrollOffsetChange != 0.0f);
+
+	const auto Now = time_get_nanoseconds();
+	if(ForceVisible || m_CaretBlinkStartTime == std::chrono::nanoseconds::zero())
+		m_CaretBlinkStartTime = Now;
+	Graphics()->TextureClear();
+	Graphics()->SetColor(1.0f, 1.0f, 1.0f, 1.0f);
+	if(!ForceVisible && !qm_lineinput::CaretVisibleForElapsed(Now - m_CaretBlinkStartTime))
+		return;
+
+	float ScreenX0, ScreenY0, ScreenX1, ScreenY1;
+	Graphics()->GetScreen(&ScreenX0, &ScreenY0, &ScreenX1, &ScreenY1);
+	const float CursorInnerWidth = ((ScreenX1 - ScreenX0) / std::max(Graphics()->ScreenWidth(), 1)) * 2.0f;
+	const float CursorOuterWidth = CursorInnerWidth * 2.0f;
+	const float CursorOuterInnerDiff = (CursorOuterWidth - CursorInnerWidth) / 2.0f;
+	const float CursorHeight = std::max(0.0f, Cursor.m_AlignedFontSize);
+	if(CursorHeight <= 0.0f)
+		return;
+
+	const IGraphics::CQuadItem OuterCaret(
+		DrawPosition.x - CursorOuterInnerDiff,
+		DrawPosition.y,
+		CursorOuterWidth,
+		CursorHeight);
+	const IGraphics::CQuadItem InnerCaret(
+		DrawPosition.x,
+		DrawPosition.y + CursorOuterInnerDiff,
+		CursorInnerWidth,
+		std::max(0.0f, CursorHeight - CursorOuterInnerDiff * 2.0f));
+
+	Graphics()->QuadsBegin();
+	Graphics()->SetColor(TextOutlineColor);
+	Graphics()->QuadsDrawTL(&OuterCaret, 1);
+	Graphics()->SetColor(TextColor);
+	Graphics()->QuadsDrawTL(&InnerCaret, 1);
+	Graphics()->QuadsEnd();
+	Graphics()->SetColor(1.0f, 1.0f, 1.0f, 1.0f);
+}
+
+bool CLineInput::ValidateActiveInputRenderedThisFrame()
 {
 	// Check if the active line input was not rendered and deactivate it in that case.
 	// This can happen e.g. when an input in the ingame menu is active and the menu is
 	// closed or when switching between menu and editor with an active input.
 	CLineInput *pActiveInput = GetActiveInput();
-	if(pActiveInput != nullptr)
+	if(pActiveInput == nullptr)
+		return false;
+	if(pActiveInput->m_WasRendered)
 	{
-		if(pActiveInput->m_WasRendered)
-		{
-			pActiveInput->m_WasRendered = false;
-		}
-		else
-		{
-			pActiveInput->Deactivate();
-			return;
-		}
+		pActiveInput->m_WasRendered = false;
+		return true;
 	}
+	pActiveInput->Deactivate();
+	return false;
+}
 
-	if(!Input()->HasComposition() || !Input()->GetCandidateCount())
-		return;
+bool CLineInput::RenderLegacyCandidates()
+{
+	if(!ValidateActiveInputRenderedThisFrame())
+		return false;
+
+	const int CandidateCount = Input()->GetCandidateCount();
+	if(!Input()->HasComposition() || CandidateCount <= 0)
+		return true;
 
 	const float FontSize = 7.0f;
 	const float Padding = 1.0f;
 	const float Margin = 4.0f;
 	const float Height = 300.0f;
 	const float Width = Height * Graphics()->ScreenAspect();
-	const vec2 ScreenSize = Graphics()->ScreenSize();
+	const int ScreenWidth = std::max(Graphics()->ScreenWidth(), 1);
+	const int ScreenHeight = std::max(Graphics()->ScreenHeight(), 1);
 
-	Graphics()->MapScreenToSize(Width, Height);
+	Graphics()->MapScreen(0.0f, 0.0f, Width, Height);
 
-	// Determine longest candidate width
 	float LongestCandidateWidth = 0.0f;
-	for(int i = 0; i < Input()->GetCandidateCount(); ++i)
+	for(int i = 0; i < CandidateCount; ++i)
 		LongestCandidateWidth = std::max(LongestCandidateWidth, TextRender()->TextWidth(FontSize, Input()->GetCandidate(i)));
 
 	const float NumOffset = 8.0f;
 	const float RectWidth = LongestCandidateWidth + Margin + NumOffset + 2.0f * Padding;
-	const float RectHeight = Input()->GetCandidateCount() * (FontSize + 2.0f * Padding) + Margin;
+	const float RectHeight = CandidateCount * (FontSize + 2.0f * Padding) + Margin;
 
-	vec2 Position = ms_CompositionWindowPosition / ScreenSize * vec2(Width, Height);
+	vec2 Position = ms_CompositionWindowPosition / vec2(ScreenWidth, ScreenHeight) * vec2(Width, Height);
 	Position.y += Margin;
 
-	// Move candidate window left if needed
 	if(Position.x + RectWidth + Margin > Width)
 		Position.x -= Position.x + RectWidth + Margin - Width;
 
-	// Move candidate window up if needed
 	if(Position.y + RectHeight + Margin > Height)
-		Position.y -= RectHeight + ms_CompositionLineHeight / ScreenSize.y * Height + 2.0f * Margin;
+		Position.y -= RectHeight + ms_CompositionLineHeight / ScreenHeight * Height + 2.0f * Margin;
 
 	Graphics()->TextureClear();
 	Graphics()->QuadsBegin();
 
-	// Draw window shadow
 	Graphics()->SetColor(0.0f, 0.0f, 0.0f, 0.8f);
-	IGraphics::CQuadItem Quad = IGraphics::CQuadItem(Position.x + 0.75f, Position.y + 0.75f, RectWidth, RectHeight);
+	IGraphics::CQuadItem Quad(Position.x + 0.75f, Position.y + 0.75f, RectWidth, RectHeight);
 	Graphics()->QuadsDrawTL(&Quad, 1);
 
-	// Draw window background
 	Graphics()->SetColor(0.15f, 0.15f, 0.15f, 1.0f);
 	Quad = IGraphics::CQuadItem(Position.x, Position.y, RectWidth, RectHeight);
 	Graphics()->QuadsDrawTL(&Quad, 1);
 
-	// Draw selected entry highlight
-	Graphics()->SetColor(0.1f, 0.4f, 0.8f, 1.0f);
-	Quad = IGraphics::CQuadItem(Position.x + Margin / 4.0f, Position.y + Margin / 2.0f + Input()->GetCandidateSelectedIndex() * (FontSize + 2.0f * Padding), RectWidth - Margin / 2.0f, FontSize + 2.0f * Padding);
-	Graphics()->QuadsDrawTL(&Quad, 1);
+	const int SelectedIndex = qm_ime_overlay::NormalizeSelectedCandidateIndex(Input()->GetCandidateSelectedIndex(), CandidateCount);
+	if(SelectedIndex >= 0)
+	{
+		Graphics()->SetColor(0.1f, 0.4f, 0.8f, 1.0f);
+		Quad = IGraphics::CQuadItem(Position.x + Margin / 4.0f, Position.y + Margin / 2.0f + SelectedIndex * (FontSize + 2.0f * Padding), RectWidth - Margin / 2.0f, FontSize + 2.0f * Padding);
+		Graphics()->QuadsDrawTL(&Quad, 1);
+	}
 	Graphics()->QuadsEnd();
 
-	// Draw candidates
-	for(int i = 0; i < Input()->GetCandidateCount(); ++i)
+	for(int i = 0; i < CandidateCount; ++i)
 	{
 		char aBuf[3];
 		str_format(aBuf, sizeof(aBuf), "%d.", (i + 1) % 10);
@@ -634,11 +786,19 @@ void CLineInput::RenderCandidates()
 		TextRender()->TextColor(1.0f, 1.0f, 1.0f, 1.0f);
 		TextRender()->Text(PosX + NumOffset, PosY, FontSize, Input()->GetCandidate(i));
 	}
+	TextRender()->TextColor(TextRender()->DefaultTextColor());
+	return true;
 }
 
 void CLineInput::SetCompositionWindowPosition(vec2 Anchor, float LineHeight)
 {
-	const vec2 ScreenScale = Graphics()->ScreenSize() / Graphics()->GetScreen().Size();
+	float ScreenX0, ScreenY0, ScreenX1, ScreenY1;
+	const int ScreenWidth = std::max(Graphics()->ScreenWidth(), 1);
+	const int ScreenHeight = std::max(Graphics()->ScreenHeight(), 1);
+	Graphics()->GetScreen(&ScreenX0, &ScreenY0, &ScreenX1, &ScreenY1);
+
+	const vec2 ScreenScale = vec2(ScreenWidth / std::max(1.0f, ScreenX1 - ScreenX0),
+		ScreenHeight / std::max(1.0f, ScreenY1 - ScreenY0));
 	ms_CompositionWindowPosition = Anchor * ScreenScale;
 	ms_CompositionLineHeight = LineHeight * ScreenScale.y;
 	Input()->SetCompositionWindowPosition(ms_CompositionWindowPosition.x, ms_CompositionWindowPosition.y, ms_CompositionLineHeight);
@@ -668,12 +828,17 @@ void CLineInput::Deactivate() const
 
 void CLineInput::OnActivate()
 {
-	Input()->StartTextInput();
+	m_InputMotion.Reset();
+	m_CaretBlinkStartTime = time_get_nanoseconds();
+	if(!TextInputAutoManaged())
+		Input()->StartTextInput();
 }
 
 void CLineInput::OnDeactivate()
 {
-	Input()->StopTextInput();
+	m_InputMotion.Reset();
+	if(!TextInputAutoManaged())
+		Input()->StopTextInput();
 	m_MouseSelection.m_Selecting = false;
 }
 

@@ -1,16 +1,11 @@
-<!-- What is the motivation for the changes of this pull request? -->
+## 改动
 
-<!-- Note that builds and other checks will be run for your change. Don't feel intimidated by failures in some of the checks. If you can't resolve them yourself, experienced devs can also resolve them before merging your pull request. -->
+说明解决的问题、触发场景以及修改后的行为。
 
-## Checklist
+## 验证
 
-- [ ] Tested the change ingame
-- [ ] Provided screenshots if it is a visual change
-- [ ] Tested in combination with possibly related configuration options
-- [ ] Written a unit test (especially base/) or added coverage to integration test
-- [ ] Considered possible null pointers and out of bounds array indexing
-- [ ] Changed no physics that affect existing maps
-- [ ] Tested the change with [ASan+UBSan or Valgrind's memcheck](https://github.com/ddnet/ddnet/blob/master/docs/DEBUGGING.md#using-addresssanitizer--undefinedbehavioursanitizer-or-valgrinds-memcheck) (optional)
-- [ ] I didn't use generative AI to generate more than single-line completions
+列出实际执行的构建、测试或游戏场景，并注明未完成的验证。视觉修改可附截图。
 
-<!-- If you did not check the AI box above, please briefly describe how AI was used (1–2 sentences). Example: "AI helped me draft initial documentation", "AI helped me translate from my native language to English" or "AI suggested refactoring options, which I reviewed and modified". -->
+## 来源与兼容性
+
+如移植第三方代码，注明来源提交和许可；如涉及配置、Mod 文件或网络行为，说明兼容处理。

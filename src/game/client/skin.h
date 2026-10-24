@@ -6,6 +6,12 @@
 #include <engine/graphics.h>
 #include <engine/shared/protocol.h>
 
+#include <memory>
+namespace QmChatAvatar
+{
+	struct SSource;
+}
+
 // do this better and nicer
 class CSkin
 {
@@ -20,6 +26,7 @@ public:
 
 		IGraphics::CTextureHandle m_Feet;
 		IGraphics::CTextureHandle m_FeetOutline;
+		std::shared_ptr<const QmChatAvatar::SSource> m_QmChatAvatar;
 
 		IGraphics::CTextureHandle m_Hands;
 		IGraphics::CTextureHandle m_HandsOutline;

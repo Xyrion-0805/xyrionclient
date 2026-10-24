@@ -125,6 +125,7 @@ struct SConfigVariable
 	EVariableType m_Type;
 	int m_Flags;
 	const char *m_pHelp;
+	const char *m_pHelpLocalizeKey = nullptr;
 	// Note that this only applies to the console command and the SetValue function,
 	// but the underlying config variable can still be modified programmatically.
 	bool m_ReadOnly = false;

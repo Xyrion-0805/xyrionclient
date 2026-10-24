@@ -64,11 +64,7 @@ else()
   message(FATAL_ERROR "Couldn't parse TClient version from src/game/version.h")
 endif()
 
-if(TCLIENT_VERSION_PATCH STREQUAL "0")
-  project(TClient VERSION ${TCLIENT_VERSION_MAJOR}.${TCLIENT_VERSION_MINOR})
-else()
-  project(TClient VERSION ${TCLIENT_VERSION_MAJOR}.${TCLIENT_VERSION_MINOR}.${TCLIENT_VERSION_PATCH})
-endif()
+project(XyrionClient VERSION 1.2.0)
 
 file(APPEND "${DATA_VERSION_FILE}" "TClient ${TCLIENT_VERSION_MAJOR}.${TCLIENT_VERSION_MINOR}.${TCLIENT_VERSION_PATCH}\n")
 
@@ -233,7 +229,7 @@ if(NOT "${CMAKE_CURRENT_BINARY_DIR}" STREQUAL "${CMAKE_CURRENT_SOURCE_DIR}")
 endif()
 
 set(SERVER_EXECUTABLE DDNet-Server CACHE STRING "Name of the built server executable")
-set(CLIENT_EXECUTABLE DDNet CACHE STRING "Name of the build client executable")
+set(CLIENT_EXECUTABLE XyrionClient CACHE STRING "Name of the build client executable")
 set(IOS_BUNDLE_IDENTIFIER "org.ddnet.client" CACHE STRING "iOS bundle identifier")
 
 ########################################################################
@@ -1703,6 +1699,11 @@ set(EXPECTED_DATA
   fonts/Font_Awesome_6_Free-Solid-900.otf
   fonts/GlowSansJ-Compressed-Book.otf
   fonts/NotoEmoji-Regular.ttf
+  fonts/Phosphor/LICENSE.txt
+  fonts/Phosphor/Phosphor-Bold.ttf
+  fonts/Phosphor/Phosphor-Fill.ttf
+  fonts/Phosphor/Phosphor-Light.ttf
+  fonts/Phosphor/Phosphor-Regular.ttf
   fonts/SourceHanSans.ttc
   fonts/index.json
   game.png
@@ -1842,6 +1843,14 @@ set(EXPECTED_DATA
   shader/pipeline.frag
   shader/pipeline.vert
   shader/prim.frag
+  shader/media_island_sdf.vert
+  shader/media_island_sdf.frag
+  shader/rounded_rect_sdf.vert
+  shader/rounded_rect_sdf.frag
+  shader/procedural_ring.vert
+  shader/procedural_ring.frag
+  shader/gaussian_blur.vert
+  shader/gaussian_blur.frag
   shader/prim.vert
   shader/primex.frag
   shader/primex.vert
@@ -1865,6 +1874,8 @@ set(EXPECTED_DATA
   shader/vulkan/quad.vert
   shader/vulkan/spritemulti.frag
   shader/vulkan/spritemulti.vert
+  shader/ui_glass.frag
+  shader/ui_glass.vert
   shader/vulkan/text.frag
   shader/vulkan/text.vert
   shader/vulkan/tile.frag
@@ -2101,6 +2112,8 @@ set(EXPECTED_DATA
   skins7/xmas_hat.png
   strong_weak.png
   tclient/builtinscripts/sayemoticon.chai
+  tclient/bestclient_media.ps1
+  tclient/editor_zh.txt
   tclient/fonts/Cabin-Regular.ttf
   tclient/fonts/FreeSansBold.ttf
   tclient/fonts/GoogleSans-Regular.ttf
@@ -2173,7 +2186,7 @@ set(EXPECTED_DATA
   # tidy-alphabetical-end
 )
 
-set_glob(DATA GLOB_RECURSE "cfg;chai;frag;json;map;otf;png;rules;ttc;ttf;txt;vert;wv" data ${EXPECTED_DATA})
+set_glob(DATA GLOB_RECURSE "cfg;chai;ps1;frag;json;map;otf;png;rules;ttc;ttf;txt;vert;wv" data ${EXPECTED_DATA})
 
 ########################################################################
 # COPY DATA AND SHARED LIBS
@@ -2206,6 +2219,17 @@ if(TARGET_OS STREQUAL "emscripten")
   list(APPEND COPY_FILES other/emscripten/background.png)
   list(APPEND COPY_FILES other/emscripten/index.html)
   list(APPEND COPY_FILES other/icons/DDNet.ico)
+endif()
+set(XYRION_PLAYBACK_RUNTIME_DIR "" CACHE PATH "Optional ABI-compatible FFmpeg playback DLL directory")
+if(TARGET_OS STREQUAL "windows" AND XYRION_PLAYBACK_RUNTIME_DIR)
+  list(REMOVE_ITEM COPY_FILES ${FFMPEG_COPY_FILES})
+  foreach(PLAYBACK_DLL avcodec-61 avformat-61 avutil-59 swresample-5 swscale-8)
+    set(PLAYBACK_FILE "${XYRION_PLAYBACK_RUNTIME_DIR}/${PLAYBACK_DLL}.dll")
+    if(NOT EXISTS "${PLAYBACK_FILE}")
+      message(FATAL_ERROR "Missing playback runtime: ${PLAYBACK_FILE}")
+    endif()
+    list(APPEND COPY_FILES "${PLAYBACK_FILE}")
+  endforeach()
 endif()
 file(COPY ${COPY_FILES} DESTINATION .)
 
@@ -2452,6 +2476,8 @@ set_src(ENGINE_SHARED GLOB_RECURSE src/engine/shared
   config_includes.h
   config_variables.h
   config_variables_tclient.h
+  config_variables_bestclient.h
+  config_variables_qmclient.h
   console.cpp
   console.h
   csv.cpp
@@ -2563,6 +2589,8 @@ set_src(ENGINE_GFX GLOB src/engine/gfx
 set_src(GAME_SHARED GLOB src/game
   # tidy-alphabetical-start
   alloc.h
+  axiom_quad_collision.cpp
+  axiom_quad_collision.h
   collision.cpp
   collision.h
   gamecore.cpp
@@ -2695,6 +2723,10 @@ if(CLIENT)
     backend/null/backend_null.h
     backend/opengl/backend_opengl.cpp
     backend/opengl/backend_opengl.h
+    backend/opengl/backend_opengl_qm_render_targets.cpp
+    backend/opengl/backend_opengl3_qm_pipelines.cpp
+    backend/opengl/opengl_qm_sl_program.h
+    backend/render_target_geometry.h
     backend/opengl/backend_opengl3.cpp
     backend/opengl/backend_opengl3.h
     backend/opengl/opengl_sl.cpp
@@ -2753,6 +2785,11 @@ if(CLIENT)
     sound.h
     sqlite.cpp
     steam.cpp
+    steam_probe.cpp
+    steam_probe.h
+    rounded_rect_geometry.h
+    rounded_rect_directions.h
+    steam_client_path.h
     text.cpp
     updater.cpp
     updater.h
@@ -2881,6 +2918,121 @@ if(CLIENT)
     components/tclient/custom_communities.h
     components/tclient/data_version.h
     components/tclient/menus_tclient.cpp
+    components/tclient/menus_xyrion.cpp
+    components/tclient/tee_accessories.cpp
+    components/tclient/tee_accessories.h
+    components/tclient/menus_mods.cpp
+    components/tclient/translation_util.cpp
+    components/tclient/translation_util.h
+    bc_ui_animations.h
+    components/hud_layout.h
+    components/hud_layout.cpp
+    components/bestclient/asset_editor_util.cpp
+    components/bestclient/asset_editor_util.h
+    components/bestclient/aspect_ratio.cpp
+    components/bestclient/aspect_ratio.h
+    components/bestclient/menus_assets_editor.cpp
+    components/bestclient/chat_bubbles.cpp
+    components/bestclient/chat_bubbles.h
+    components/bestclient/finish_prediction.cpp
+    components/bestclient/finish_prediction.h
+    QmUi/UiSurface.h
+    QmUi/UiSurface.cpp
+    QmUi/QmDropdown.cpp
+    QmUi/QmScroll.cpp
+    QmUi/UiFormLogic.cpp
+    QmUi/UiForms.cpp
+    QmUi/UiButtons.cpp
+    components/qm_console_settings.cpp
+    components/qm_console_widgets.cpp
+    QmUi/UiNavigation.cpp
+    QmUi/QmRt.h
+    QmUi/QmRt.cpp
+    QmUi/QmLayout.h
+    QmUi/QmLayout.cpp
+    QmUi/QmRender.h
+    QmUi/QmRender.cpp
+    QmUi/QmAnimationBackend.h
+    QmUi/QmAnimationBackend.cpp
+    QmUi/QmAnim.h
+    QmUi/QmAnimCurves.h
+    QmUi/QmAnimResolve.h
+    QmUi/QmAnimResolve.cpp
+    QmUi/QmTree.h
+    QmUi/QmTree.cpp
+    QmUi/UiContext.h
+    QmUi/UiTokens.h
+    QmUi/QmTheme.h
+    QmUi/QmInputMotion.h
+    QmUi/QmChatCompletionAppearance.h
+    QmUi/QmConsoleUi.h
+    QmUi/QmImeAppearance.h
+    QmUi/QmImeCandidateLayout.h
+    QmUi/QmColorGradient.h
+    components/message_gradient.cpp
+    components/message_gradient.h
+    components/qmclient/chat_command_hud_render.h
+    components/qmclient/chat_command_hud.h
+    components/qmclient/console_appearance.h
+    components/qmclient/console_syntax.h
+    components/qmclient/console_search_input.h
+    components/qmclient/console_selection.h
+    components/qmclient/console_text.h
+    components/qmclient/weapon_trajectory.cpp
+    components/qmclient/weapon_trajectory.h
+    components/qmclient/gores_drown_tracker.h
+    components/bestclient/inputs.cpp
+    components/bestclient/inputs.h
+    components/bestclient/cloud_input.cpp
+    components/bestclient/cloud_input.h
+    components/bestclient/snap_tap.cpp
+    components/bestclient/snap_tap.h
+    components/bestclient/media_decoder.cpp
+    components/bestclient/media_decoder.h
+    components/bestclient/music_player.cpp
+    components/bestclient/music_player.h
+    components/bestclient/music_player_lyrics.cpp
+    components/bestclient/music_player_lyrics.h
+    components/bestclient/server_map_preview.cpp
+    components/bestclient/server_map_preview.h
+    components/bestclient/ui_animations.cpp
+    components/bestclient/ui_animations.h
+    components/bestclient/visualizer/analyzer.cpp
+    components/bestclient/visualizer/analyzer.h
+    components/bestclient/visualizer/service.cpp
+    components/bestclient/visualizer/service.h
+    components/bestclient/visualizer/smoother.cpp
+    components/bestclient/visualizer/smoother.h
+    components/bestclient/visualizer/source.h
+    components/bestclient/visualizer/source_passive.cpp
+    components/bestclient/visualizer/source_priority.h
+    components/bestclient/visualizer/source_wasapi.cpp
+    components/bestclient/visualizer/types.h
+    components/tclient/ai_reply.cpp
+    components/tclient/ai_reply.h
+    components/tclient/rescue_solver.cpp
+    components/tclient/rescue_solver.h
+    components/tclient/web_browser.cpp
+    components/tclient/web_browser.h
+    components/tclient/ai_reply_util.cpp
+    components/tclient/ai_reply_util.h
+    components/tclient/command_help.cpp
+    components/tclient/command_help.h
+    components/tclient/video_file_dialog.cpp
+    components/tclient/video_file_dialog.h
+    components/tclient/video_background.cpp
+    components/tclient/video_background.h
+    components/tclient/modsystem/mod_blocks.h
+    components/tclient/modsystem/mod.h
+    components/tclient/modsystem/mod.cpp
+    components/tclient/modsystem/expression.h
+    components/tclient/modsystem/expression.cpp
+    components/tclient/modsystem/file_io.h
+    components/tclient/modsystem/file_io.cpp
+    components/tclient/modsystem/mod_manager.h
+    components/tclient/modsystem/mod_manager.cpp
+    components/tclient/modsystem/runtime.h
+    components/tclient/modsystem/runtime.cpp
     components/tclient/mod.cpp
     components/tclient/mod.h
     components/tclient/moving_tiles.cpp
@@ -2917,6 +3069,13 @@ if(CLIENT)
     components/touch_controls.h
     components/voting.cpp
     components/voting.h
+    qm_ime_manager.cpp
+    components/qm_dummy_miniview.cpp
+    qm_ime_manager.h
+    qm_ime_candidate_popup.cpp
+    qm_ime_candidate_popup.h
+    QmUi/QmLineInputMotion.cpp
+    QmUi/QmLineInputMotion.h
     gameclient.cpp
     gameclient.h
     laser_data.cpp
@@ -2961,6 +3120,7 @@ if(CLIENT)
     ui_listbox.h
     ui_popups.cpp
     ui_rect.cpp
+    ui_rect_geometry.cpp
     ui_rect.h
     ui_scrollregion.cpp
     ui_scrollregion.h
@@ -2987,6 +3147,8 @@ if(CLIENT)
     editor_trackers.cpp
     editor_trackers.h
     editor_ui.cpp
+    localization.cpp
+    localization.h
     editor_ui.h
     enums.h
     envelope_editor.cpp
@@ -3221,6 +3383,16 @@ if(CLIENT)
   endif()
 
   # Silence warnings from ChaiScript
+  if(WIN32)
+    set(XYRION_WEBVIEW2_DIR "" CACHE PATH "Path to Microsoft.Web.WebView2 NuGet package")
+    if(NOT EXISTS "${XYRION_WEBVIEW2_DIR}/build/native/include/WebView2.h")
+      message(FATAL_ERROR "WebView2 SDK is required: run scripts/build_xyrion.ps1")
+    endif()
+    target_include_directories(game-client SYSTEM PRIVATE "${XYRION_WEBVIEW2_DIR}/build/native/include")
+    target_link_libraries(game-client ole32 uuid)
+    add_custom_command(TARGET game-client POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      "${XYRION_WEBVIEW2_DIR}/build/native/x64/WebView2Loader.dll" "$<TARGET_FILE_DIR:game-client>")
+  endif()
   target_include_directories(game-client SYSTEM PRIVATE
     ${PROJECT_SOURCE_DIR}/src/engine/external/chaiscript)
 
@@ -3622,6 +3794,8 @@ if((GTEST_FOUND OR DOWNLOAD_GTEST) AND SERVER)
   set_src(TESTS GLOB src/test
     # tidy-alphabetical-start
     aio_test.cpp
+    ai_reply_test.cpp
+    axiom_collision_test.cpp
     bezier_test.cpp
     blocklist_driver_test.cpp
     bytes_be_test.cpp
@@ -3645,6 +3819,8 @@ if((GTEST_FOUND OR DOWNLOAD_GTEST) AND SERVER)
     mapbugs_test.cpp
     mapitems_test.cpp
     math_test.cpp
+    modsystem_file_test.cpp
+    modsystem_test.cpp
     mem_test.cpp
     mutes_test.cpp
     name_ban_test.cpp
@@ -3673,9 +3849,37 @@ if((GTEST_FOUND OR DOWNLOAD_GTEST) AND SERVER)
     uuid_test.cpp
     vmath_test.cpp
     windows_test.cpp
+    qm_console_log_filter_test.cpp
+    qm_console_selection_test.cpp
+    qm_console_search_input_test.cpp
+    qm_console_appearance_test.cpp
+    qm_console_text_test.cpp
+    qm_console_syntax_test.cpp
+    qm_chat_avatar_test.cpp
+    qm_console_ui_layout_test.cpp
+    qm_console_settings_layout_test.cpp
+    qm_tooltip_ownership_test.cpp
+    qm_gores_drown_tracker_test.cpp
+    qm_dummy_mini_view_layout_test.cpp
+    qm_dummy_miniview_render_test.cpp
+    qm_ime_platform_test.cpp
+    qm_ime_candidate_layout_test.cpp
+    qm_text_gradient_geometry_test.cpp
+    qm_render_target_geometry_test.cpp
+    qm_chat_command_hud_test.cpp
+    qm_steam_client_path_test.cpp
+    qm_weapon_trajectory_test.cpp
+    xyrion_dummy_session_test.cpp
+    xyrion_features_test.cpp
     # tidy-alphabetical-end
   )
   set(TESTS_EXTRA
+    src/game/client/ui_rect_geometry.cpp
+    src/game/client/skin.cpp
+    src/game/client/QmUi/QmAnimationBackend.cpp
+    src/game/client/QmUi/QmLineInputMotion.cpp
+    src/game/client/components/bestclient/asset_editor_util.cpp
+    src/game/client/components/tclient/translation_util.cpp
     # tidy-alphabetical-start
     src/engine/client/blocklist_driver.cpp
     src/engine/client/blocklist_driver.h
@@ -3688,6 +3892,16 @@ if((GTEST_FOUND OR DOWNLOAD_GTEST) AND SERVER)
     src/engine/client/sqlite.cpp
     src/game/client/components/censor.cpp
     src/game/client/components/censor.h
+    src/game/client/components/tclient/ai_reply_util.cpp
+    src/game/client/components/tclient/ai_reply_util.h
+    src/game/client/components/tclient/modsystem/mod.cpp
+    src/game/client/components/tclient/modsystem/mod.h
+    src/game/client/components/tclient/modsystem/expression.cpp
+    src/game/client/components/tclient/modsystem/expression.h
+    src/game/client/components/tclient/modsystem/file_io.cpp
+    src/game/client/components/tclient/modsystem/file_io.h
+    src/game/client/components/tclient/modsystem/runtime.cpp
+    src/game/client/components/tclient/modsystem/runtime.h
     # tidy-alphabetical-end
   )
 

@@ -136,6 +136,7 @@ void CInfoMessages::AddInfoMsg(const CInfoMsg &InfoMsg)
 	m_InfoMsgCurrent = (m_InfoMsgCurrent + 1) % MAX_INFOMSGS;
 	DeleteTextContainers(m_aInfoMsgs[m_InfoMsgCurrent]);
 	m_aInfoMsgs[m_InfoMsgCurrent] = InfoMsg;
+	m_aInfoMsgs[m_InfoMsgCurrent].m_AppearTime = time_get();
 	CreateTextContainersIfNotCreated(m_aInfoMsgs[m_InfoMsgCurrent]);
 
 	Graphics()->MapScreen(ScreenRect);
@@ -478,7 +479,8 @@ void CInfoMessages::OnRender()
 
 		if(InfoMsg.m_Type == EType::TYPE_KILL && g_Config.m_ClShowKillMessages)
 		{
-			RenderKillMsg(InfoMsg, StartX, y);
+			const float Slide = GameClient()->m_BcUiAnimations.KillfeedSlideOffsetX(TextRender(), InfoMsg.m_AppearTime, time_get(), InfoMsg.m_VictimTextContainerIndex, InfoMsg.m_KillerTextContainerIndex, InfoMsg.m_TeamSize, InfoMsg.m_aVictimIds[0], InfoMsg.m_KillerId);
+			RenderKillMsg(InfoMsg, StartX + Slide, y);
 			y += ROW_HEIGHT;
 		}
 		else if(InfoMsg.m_Type == EType::TYPE_FINISH && g_Config.m_ClShowFinishMessages)

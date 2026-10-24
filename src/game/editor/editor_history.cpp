@@ -1,3 +1,4 @@
+#include <game/editor/localization.h>
 #include "editor_history.h"
 
 #include "editor.h"
@@ -145,7 +146,7 @@ void CEditor::RenderEditorHistory(CUIRect View)
 	InfoProps.m_MaxWidth = ToolBar.w - 60.f;
 	InfoProps.m_EllipsisAtEnd = true;
 	Label.VSplitLeft(8.0f, nullptr, &Label);
-	Ui()->DoLabel(&Label, "Editor history. Click on an action to undo all actions above.", 10.0f, TEXTALIGN_ML, InfoProps);
+	Ui()->DoLabel(&Label, EditorLocalize("Editor history. Click on an action to undo all actions above."), 10.0f, TEXTALIGN_ML, InfoProps);
 
 	CEditorHistory *pCurrentHistory;
 	if(State.m_HistoryType == EHistoryType::EDITOR)
@@ -218,7 +219,7 @@ void CEditor::RenderEditorHistory(CUIRect View)
 		{
 			Item.m_Rect.VMargin(5.0f, &Label);
 
-			Ui()->DoLabel(&Label, "Loaded map", 10.0f, TEXTALIGN_ML);
+			Ui()->DoLabel(&Label, EditorLocalize("Loaded map"), 10.0f, TEXTALIGN_ML);
 		}
 	}
 

@@ -46,6 +46,33 @@ void CMenus::RenderGame(CUIRect MainView)
 {
 	CUIRect Button, ButtonBars, ButtonBar, ButtonBar2;
 	bool ShowDDRaceButtons = MainView.w > 855.0f;
+	if(Client()->DummyConnectedCount() > 0)
+	{
+		CUIRect Selector, Choice;
+		MainView.HSplitTop(35.0f, &Selector, &MainView);
+		Selector.Draw(ms_ColorTabbarActive, IGraphics::CORNER_ALL, 5.0f);
+		Selector.Margin(5.0f, &Selector);
+		static CButtonContainer s_aDummySelectButtons[4];
+		static CButtonContainer s_aDummyDisconnectButtons[3];
+		for(int Number = 0; Number <= Client()->DummyConnectionLimit(); Number++)
+		{
+			Selector.VSplitLeft(100.0f, &Choice, &Selector);
+			Selector.VSplitLeft(5.0f, nullptr, &Selector);
+			char aLabel[64];
+			str_format(aLabel, sizeof(aLabel), Number == 0 ? "主号" : "分身 %d", Number);
+			const bool Connected = Client()->DummyIsConnected(Number);
+			if(DoButton_Menu(&s_aDummySelectButtons[Number], aLabel, Client()->DummySelected() == Number, &Choice) && Connected)
+				Client()->DummySelect(Number);
+			if(Number > 0)
+			{
+				Selector.VSplitLeft(22.0f, &Choice, &Selector);
+				Selector.VSplitLeft(5.0f, nullptr, &Selector);
+				if(DoButton_Menu(&s_aDummyDisconnectButtons[Number - 1], "×", 0, &Choice) && Connected)
+					Client()->DummyDisconnectNumber(Number);
+			}
+		}
+		MainView.HSplitTop(5.0f, nullptr, &MainView);
+	}
 	MainView.HSplitTop(45.0f + (g_Config.m_ClTouchControls ? 35.0f : 0.0f), &ButtonBars, &MainView);
 	ButtonBars.Draw(ms_ColorTabbarActive, IGraphics::CORNER_B, 10.0f);
 	ButtonBars.Margin(10.0f, &ButtonBars);
@@ -91,23 +118,27 @@ void CMenus::RenderGame(CUIRect MainView)
 	ButtonBar.VSplitRight(170.0f, &ButtonBar, &Button);
 
 	static CButtonContainer s_DummyButton;
+	char aDummyButtonText[64];
+	const int DummyCount = Client()->DummyConnectedCount();
+	const int DummyLimit = Client()->DummyConnectionLimit();
+	str_format(aDummyButtonText, sizeof(aDummyButtonText), "%s (%d/%d)", DummyCount >= DummyLimit ? Localize("Disconnect Dummies") : Localize("Connect Dummies"), DummyCount, DummyLimit);
 	if(!Client()->DummyAllowed())
 	{
-		DoButton_Menu(&s_DummyButton, Localize("Connect Dummy"), 1, &Button);
+		DoButton_Menu(&s_DummyButton, aDummyButtonText, 1, &Button);
 		GameClient()->m_Tooltips.DoToolTip(&s_DummyButton, &Button, Localize("Dummy is not allowed on this server"));
 	}
 	else if(Client()->DummyConnectingDelayed())
 	{
-		DoButton_Menu(&s_DummyButton, Localize("Connect Dummy"), 1, &Button);
+		DoButton_Menu(&s_DummyButton, aDummyButtonText, 1, &Button);
 		GameClient()->m_Tooltips.DoToolTip(&s_DummyButton, &Button, Localize("Please wait…"));
 	}
 	else if(Client()->DummyConnecting())
 	{
-		DoButton_Menu(&s_DummyButton, Localize("Connecting dummy"), 1, &Button);
+		DoButton_Menu(&s_DummyButton, Localize("Connecting dummies…"), 1, &Button);
 	}
-	else if(DoButton_Menu(&s_DummyButton, Client()->DummyConnected() ? Localize("Disconnect Dummy") : Localize("Connect Dummy"), 0, &Button))
+	else if(DoButton_Menu(&s_DummyButton, aDummyButtonText, 0, &Button))
 	{
-		if(!Client()->DummyConnected())
+		if(DummyCount < DummyLimit)
 		{
 			Client()->DummyConnect();
 		}
@@ -115,7 +146,7 @@ void CMenus::RenderGame(CUIRect MainView)
 		{
 			if(GameClient()->CurrentRaceTime() / 60 >= g_Config.m_ClConfirmDisconnectTime && g_Config.m_ClConfirmDisconnectTime >= 0)
 			{
-				PopupConfirm(Localize("Disconnect Dummy"), Localize("Are you sure that you want to disconnect your dummy?"), Localize("Yes"), Localize("No"), &CMenus::PopupConfirmDisconnectDummy);
+				PopupConfirm(Localize("Disconnect Dummies"), Localize("Are you sure that you want to disconnect your dummies?"), Localize("Yes"), Localize("No"), &CMenus::PopupConfirmDisconnectDummy);
 			}
 			else
 			{

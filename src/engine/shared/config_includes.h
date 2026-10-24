@@ -10,3 +10,6 @@ SET_CONFIG_DOMAIN(ConfigDomain::DDNET)
 
 SET_CONFIG_DOMAIN(ConfigDomain::TCLIENT)
 #include "config_variables_tclient.h"
+
+#include "config_variables_bestclient.h"
+#include "config_variables_qmclient.h"

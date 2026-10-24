@@ -33,6 +33,7 @@ public:
 	void OnInit() override;
 	void OnMapLoad() override;
 	void OnRender() override;
+	bool RenderCustom(vec2 Center, float Zoom);
 
 	void LoadBackground();
 	const char *MapName() const { return m_aMapName; }

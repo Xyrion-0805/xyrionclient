@@ -1,3 +1,4 @@
+#include <game/editor/localization.h>
 #include "quad_art.h"
 
 #include "editor.h"
@@ -251,7 +252,7 @@ CUi::EPopupMenuFunctionResult CEditor::PopupQuadArt(void *pContext, CUIRect View
 	// Title
 	CUIRect Label;
 	View.HSplitTop(20.0f, &Label, &View);
-	pEditor->Ui()->DoLabel(&Label, "Configure quad art", 20.0f, TEXTALIGN_MC);
+	pEditor->Ui()->DoLabel(&Label, EditorLocalize("Configure quad art"), 20.0f, TEXTALIGN_MC);
 	View.HSplitTop(10.0f, nullptr, &View);
 
 	// Properties

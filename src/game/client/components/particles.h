@@ -80,6 +80,7 @@ public:
 	int Sizeof() const override { return sizeof(*this); }
 
 	void Add(int Group, CParticle *pPart, float TimePassed = 0.f);
+	void RenderGroup(int Group);
 
 	void OnReset() override;
 	void OnRender() override;
@@ -101,7 +102,6 @@ private:
 	float m_FrictionFraction = 0.0f;
 	int64_t m_LastRenderTime = 0;
 
-	void RenderGroup(int Group);
 	void Update(float TimePassed);
 
 	template<int TGROUP>

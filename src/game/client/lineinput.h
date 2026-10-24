@@ -3,6 +3,8 @@
 #ifndef GAME_CLIENT_LINEINPUT_H
 #define GAME_CLIENT_LINEINPUT_H
 
+#include "QmUi/QmLineInputMotion.h"
+
 #include <base/vmath.h>
 
 #include <engine/client.h>
@@ -12,6 +14,8 @@
 
 #include <game/client/ui_rect.h>
 
+#include <chrono>
+
 enum class EInputPriority
 {
 	NONE = 0,
@@ -20,10 +24,65 @@ enum class EInputPriority
 	CONSOLE,
 };
 
+namespace qm_ime_overlay
+{
+	// 常见 IME 一页有 9～10 项，不能额外固定为七项而隐藏本页尾部候选。
+	inline constexpr int FIXED_CANDIDATE_VIEWPORT_SIZE = 16;
+
+	struct SQmImeCandidateViewport
+	{
+		int m_Start = 0;
+		int m_Count = 0;
+	};
+
+	inline int NormalizeSelectedCandidateIndex(int SelectedIndex, int CandidateCount)
+	{
+		if(CandidateCount <= 0)
+			return -1;
+		if(SelectedIndex < 0 || SelectedIndex >= CandidateCount)
+			return 0;
+		return SelectedIndex;
+	}
+	inline SQmImeCandidateViewport BuildCandidateViewport(int CandidateCount, int SelectedIndex, int PreviousStart)
+	{
+		SQmImeCandidateViewport Viewport;
+		if(CandidateCount <= 0)
+			return Viewport;
+
+		Viewport.m_Count = std::min(CandidateCount, FIXED_CANDIDATE_VIEWPORT_SIZE);
+		const int MaxStart = std::max(0, CandidateCount - Viewport.m_Count);
+		const int Selected = NormalizeSelectedCandidateIndex(SelectedIndex, CandidateCount);
+		int Start = std::clamp(PreviousStart, 0, MaxStart);
+		if(Selected < Start)
+			Start = Selected;
+		else if(Selected >= Start + Viewport.m_Count)
+			Start = Selected - Viewport.m_Count + 1;
+		Viewport.m_Start = std::clamp(Start, 0, MaxStart);
+		return Viewport;
+	}
+} // namespace qm_ime_overlay
+
+namespace qm_lineinput
+{
+	inline bool CaretVisibleForElapsed(std::chrono::nanoseconds Elapsed)
+	{
+		using namespace std::chrono_literals;
+		if(Elapsed < 0ns)
+			return true;
+		return Elapsed % 1s < 500ms;
+	}
+} // namespace qm_lineinput
+
 // line input helper
 class CLineInput
 {
 public:
+	enum class ERenderMode
+	{
+		DRAW,
+		GEOMETRY,
+	};
+
 	struct SMouseSelection
 	{
 		bool m_Selecting = false;
@@ -49,6 +108,7 @@ private:
 
 	static CLineInput *ms_pActiveInput;
 	static EInputPriority ms_ActiveInputPriority;
+	static bool ms_TextInputAutoManaged;
 
 	static vec2 ms_CompositionWindowPosition;
 	static float ms_CompositionLineHeight;
@@ -68,10 +128,13 @@ private:
 	float m_ScrollOffset;
 	float m_ScrollOffsetChange;
 	vec2 m_CaretPosition;
+	std::chrono::nanoseconds m_CaretBlinkStartTime{};
+	CQmLineInputMotion m_InputMotion;
 	SMouseSelection m_MouseSelection;
 	size_t m_LastCompositionCursorPos;
 
 	bool m_Hidden;
+	bool m_HideCursor = false;
 	const char *m_pEmptyText;
 	FClipboardLineCallback m_pfnClipboardLineCallback;
 	FDisplayTextCallback m_pfnDisplayTextCallback;
@@ -90,6 +153,8 @@ private:
 	};
 	static void MoveCursor(EMoveDirection Direction, bool MoveWord, const char *pStr, size_t MaxSize, size_t *pCursorPos);
 	static void SetCompositionWindowPosition(vec2 Anchor, float LineHeight);
+	void RenderCaret(const CTextCursor &Cursor, bool ForceVisible, ColorRGBA TextColor, ColorRGBA TextOutlineColor);
+	void RenderSelection(const CTextCursor &Cursor, ColorRGBA SelectionColor);
 
 	void OnActivate();
 	void OnDeactivate();
@@ -102,9 +167,15 @@ public:
 		ms_pInput = pInput;
 		ms_pTextRender = pTextRender;
 	}
-	static void RenderCandidates();
+	static bool RenderLegacyCandidates();
+	static bool ValidateActiveInputRenderedThisFrame();
 
 	static CLineInput *GetActiveInput() { return ms_pActiveInput; }
+	static EInputPriority GetActiveInputPriority() { return ms_ActiveInputPriority; }
+	static void SetTextInputAutoManaged(bool Managed) { ms_TextInputAutoManaged = Managed; }
+	static bool TextInputAutoManaged() { return ms_TextInputAutoManaged; }
+	static vec2 GetCompositionWindowPosition() { return ms_CompositionWindowPosition; }
+	static float GetCompositionLineHeight() { return ms_CompositionLineHeight; }
 
 	CLineInput()
 	{
@@ -165,6 +236,7 @@ public:
 
 	bool IsHidden() const { return m_Hidden; }
 	void SetHidden(bool Hidden) { m_Hidden = Hidden; }
+	void SetHideCursor(bool Hide) { m_HideCursor = Hide; }
 
 	const char *GetEmptyText() const { return m_pEmptyText; }
 	void SetEmptyText(const char *pText) { m_pEmptyText = pText; }
@@ -187,7 +259,8 @@ public:
 		return Changed;
 	}
 
-	STextBoundingBox Render(const CUIRect *pRect, float FontSize, int Align, bool Changed, float LineWidth, float LineSpacing, const std::vector<STextColorSplit> &vColorSplits = {});
+	// GEOMETRY 保留鼠标选择与光标几何，不提交文字、选区或光标绘制。
+	STextBoundingBox Render(const CUIRect *pRect, float FontSize, int Align, bool Changed, float LineWidth, float LineSpacing, const std::vector<STextColorSplit> &vColorSplits = {}, ERenderMode Mode = ERenderMode::DRAW);
 	SMouseSelection *GetMouseSelection() { return &m_MouseSelection; }
 
 	const void *GetClearButtonId() const { return &m_ClearButtonId; }

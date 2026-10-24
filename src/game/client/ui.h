@@ -3,20 +3,76 @@
 #ifndef GAME_CLIENT_UI_H
 #define GAME_CLIENT_UI_H
 
+#include "QmUi/ColorPickerPalette.h"
+#include "QmUi/QmAnimationBackend.h"
+#include "QmUi/QmCardLabelHints.h"
+#include "QmUi/QmDropdown.h"
+#include "QmUi/QmPopupPointer.h"
+#include "QmUi/QmPopupSource.h"
+#include "QmUi/QmUiLifetime.h"
+#include "QmUi/UiTokens.h"
 #include "lineinput.h"
 #include "ui_rect.h"
 
 #include <engine/input.h>
 #include <engine/textrender.h>
 
+#include <algorithm>
+#include <array>
 #include <chrono>
+#include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
 class CScrollRegion;
+class CTooltips;
+enum class EQmIcon;
 class IClient;
 class IGraphics;
 class IKernel;
+class CUiScopedQuadBatch;
+class CUiScopedGaussianBlur;
+class CUiScopedGaussianBlurSuppression;
+
+inline float QmUiVirtualScreenHeight(int ScalePercent)
+{
+	const float Scale = std::clamp(ScalePercent, 50, 200) / 100.0f;
+	return 600.0f / Scale;
+}
+
+inline float QmUiCenteredMargin(const CUIRect &Rect, float PreferredMargin, float MinimumWidth, float MinimumHeight)
+{
+	const float WidthMargin = (Rect.w - MinimumWidth) * 0.5f;
+	const float HeightMargin = (Rect.h - MinimumHeight) * 0.5f;
+	return std::clamp(std::min(WidthMargin, HeightMargin), 0.0f, PreferredMargin);
+}
+
+inline int QmUiVisibleRows(float AvailableHeight, float ReservedHeight, float RowHeight, int ItemCount, int MaxRows)
+{
+	if(RowHeight <= 0.0f || ItemCount <= 0 || MaxRows <= 0)
+		return 0;
+	const int RowsByHeight = std::max(0, (int)((AvailableHeight - ReservedHeight) / RowHeight));
+	return std::min({RowsByHeight, ItemCount, MaxRows});
+}
+
+// 输入框只能在当前帧于命中区内按下左键时接管，避免拖动其他控件时跨入输入框抢占焦点。
+inline bool QmEditBoxShouldStartActivation(bool Inside, bool MouseButtonClicked)
+{
+	return Inside && MouseButtonClicked;
+}
+
+// 纯图标按钮共用正方形绘制和命中区域，保留调用方分配区域的中心。
+inline CUIRect QmUiSquareIconButtonRect(const CUIRect &Rect)
+{
+	const float Side = std::max(0.0f, std::min(Rect.w, Rect.h));
+	return CUIRect{Rect.x + (Rect.w - Side) * 0.5f, Rect.y + (Rect.h - Side) * 0.5f, Side, Side};
+}
+
+constexpr int UiGaussianBlurTargetDimension(int ScreenDimension)
+{
+	return ScreenDimension > 0 ? (ScreenDimension + 3) / 4 : 0;
+}
 
 enum class EEditState
 {
@@ -146,11 +202,94 @@ public:
 
 class CUi;
 
+class CUiScopedQuadBatch
+{
+public:
+	explicit CUiScopedQuadBatch(CUi *pUi);
+	~CUiScopedQuadBatch();
+
+	CUiScopedQuadBatch(const CUiScopedQuadBatch &) = delete;
+	CUiScopedQuadBatch &operator=(const CUiScopedQuadBatch &) = delete;
+
+private:
+	CUi *m_pUi;
+};
+
+class CUiScopedGaussianBlur
+{
+public:
+	explicit CUiScopedGaussianBlur(CUi *pUi);
+	CUiScopedGaussianBlur(CUi *pUi, float Alpha);
+	~CUiScopedGaussianBlur();
+
+	CUiScopedGaussianBlur(const CUiScopedGaussianBlur &) = delete;
+	CUiScopedGaussianBlur &operator=(const CUiScopedGaussianBlur &) = delete;
+
+private:
+	CUi *m_pUi;
+};
+
+class CUiScopedGaussianBlurSuppression
+{
+public:
+	explicit CUiScopedGaussianBlurSuppression(CUi *pUi);
+	CUiScopedGaussianBlurSuppression(CUi *pUi, bool Active);
+	~CUiScopedGaussianBlurSuppression();
+
+	CUiScopedGaussianBlurSuppression(const CUiScopedGaussianBlurSuppression &) = delete;
+	CUiScopedGaussianBlurSuppression &operator=(const CUiScopedGaussianBlurSuppression &) = delete;
+
+private:
+	CUi *m_pUi;
+	bool m_Active;
+};
+
+inline bool UiBatchableRectHasPositiveSize(float Width, float Height)
+{
+	return Width > 0.0f && Height > 0.0f;
+}
+
+inline bool UiQuadBatchHasPendingSubmission(int QuadContainerIndex, size_t SpriteCount)
+{
+	return QuadContainerIndex >= 0 && SpriteCount > 0;
+}
+
+struct SUiQuadBatchSubmissionPlan
+{
+	bool m_RenderImmediately = false;
+	bool m_FlushBeforeQueue = false;
+	bool m_QueueSprite = false;
+	bool m_LeavesBatchUntouched = false;
+};
+
+inline SUiQuadBatchSubmissionPlan UiPlanQuadBatchSubmission(bool BatchActive, int CurrentQuadContainerIndex, const ColorRGBA &CurrentColor, int NextQuadContainerIndex, const ColorRGBA &NextColor)
+{
+	SUiQuadBatchSubmissionPlan Plan;
+	if(NextQuadContainerIndex < 0)
+	{
+		Plan.m_LeavesBatchUntouched = true;
+		return Plan;
+	}
+
+	if(!BatchActive)
+	{
+		Plan.m_RenderImmediately = true;
+		return Plan;
+	}
+
+	if(CurrentQuadContainerIndex != -1 && (CurrentQuadContainerIndex != NextQuadContainerIndex || CurrentColor != NextColor))
+		Plan.m_FlushBeforeQueue = true;
+
+	Plan.m_QueueSprite = true;
+	return Plan;
+}
+
 class CUIElement
 {
 	friend class CUi;
 
-	CUi *m_pUI;
+	CUi *m_pUI = nullptr;
+	CQmUiLifetime m_Lifetime;
 
 	CUIElement(CUi *pUI, int RequestedRectCount) { Init(pUI, RequestedRectCount); }
 
@@ -169,9 +308,19 @@ public:
 		float m_Height;
 		float m_Rounding;
 		int m_Corners;
+		float m_BackgroundAlphaScale;
 
 		std::string m_Text;
 		int m_ReadCursorGlyphCount;
+		std::array<EQmIcon, 8> m_aQmIcons;
+		int m_NumQmIcons;
+		EFontPreset m_FontPreset;
+		float m_FontSize;
+		int m_TextAlign;
+		float m_LabelMaxWidth;
+		int m_LabelFlags;
+		int m_LineCount;
+		float m_BiggestCharacterHeight;
 
 		CTextCursor m_Cursor;
 
@@ -192,6 +341,11 @@ protected:
 
 public:
 	CUIElement() = default;
+	CUIElement(const CUIElement &) = delete;
+	CUIElement &operator=(const CUIElement &) = delete;
+	CUIElement(CUIElement &&) = delete;
+	CUIElement &operator=(CUIElement &&) = delete;
+	~CUIElement();
 
 	void Init(CUi *pUI, int RequestedRectCount);
 
@@ -205,12 +359,16 @@ public:
 		return !m_vUIRects.empty();
 	}
 
+	bool IsRegistered() const { return m_pUI != nullptr; }
+	CQmUiLifetime::CWeakRef WeakRef() { return m_Lifetime.WeakRef(); }
+
 	void InitRects(int RequestedRectCount);
 };
 
 struct SLabelProperties
 {
 	float m_MaxWidth = -1;
+	bool m_DisallowNewline = false;
 	bool m_StopAtEnd = false;
 	bool m_EllipsisAtEnd = false;
 	bool m_EnableWidthCheck = true;
@@ -234,19 +392,23 @@ enum EButtonFlags : unsigned
 	BUTTONFLAG_MIDDLE = 1 << 2,
 
 	BUTTONFLAG_ALL = BUTTONFLAG_LEFT | BUTTONFLAG_RIGHT | BUTTONFLAG_MIDDLE,
+	// 新按下按当前命中位置处理，不依赖上一帧的 HotItem。
+	BUTTONFLAG_CURRENT_HIT = 1 << 3,
 };
 
 struct SMenuButtonProperties
 {
 	int m_Checked = 0;
+	bool m_Enabled = true;
 	bool m_HintRequiresStringCheck = false;
 	bool m_HintCanChangePositionOrSize = false;
 	bool m_UseIconFont = false;
 	bool m_ShowDropDownIcon = false;
 	int m_Corners = IGraphics::CORNER_ALL;
-	float m_Rounding = 5.0f;
+	float m_Rounding = ui_token::radius::BASE;
 	float m_FontFactor = 0.0f;
-	ColorRGBA m_Color = ColorRGBA(1.0f, 1.0f, 1.0f, 0.5f);
+	float m_FontSize = -1.0f;
+	std::optional<ColorRGBA> m_Color;
 	unsigned m_Flags = BUTTONFLAG_LEFT;
 };
 
@@ -271,13 +433,27 @@ class CButtonContainer
 
 struct SValueSelectorProperties
 {
+	typedef void (*FValueSelectorFormatCallback)(int64_t Value, char *pBuf, int BufSize, int Base, int HexPrefix);
+	typedef bool (*FValueSelectorParseCallback)(const char *pText, int64_t &Value, int Base);
+
 	bool m_UseScroll = true;
 	int64_t m_Step = 1;
 	float m_Scale = 1.0f;
 	bool m_IsHex = false;
 	int m_HexPrefix = 6;
 	ColorRGBA m_Color = ColorRGBA(0.0f, 0.0f, 0.0f, 0.4f);
+	int m_TextAlign = TEXTALIGN_ML;
+	bool m_SelectAllOnActivate = true;
+	FValueSelectorFormatCallback m_pfnFormatValue = nullptr;
+	FValueSelectorParseCallback m_pfnParseValue = nullptr;
 };
+
+inline float QmFitSingleLineFontSize(float PreferredSize, float MinimumSize, float TextWidth, float AvailableWidth)
+{
+	if(PreferredSize <= 0.0f || MinimumSize <= 0.0f || TextWidth <= 0.0f || AvailableWidth <= 0.0f || TextWidth <= AvailableWidth)
+		return PreferredSize;
+	return std::clamp(PreferredSize * AvailableWidth / TextWidth, MinimumSize, PreferredSize);
+}
 
 struct SProgressSpinnerProperties
 {
@@ -293,20 +469,12 @@ struct SPopupMenuId
 {
 };
 
-struct SPopupMenuProperties
-{
-	int m_Corners = IGraphics::CORNER_ALL;
-	ColorRGBA m_BorderColor = ColorRGBA(0.5f, 0.5f, 0.5f, 0.75f);
-	ColorRGBA m_BackgroundColor = ColorRGBA(0.0f, 0.0f, 0.0f, 0.75f);
-};
-
 /**
- * Text that keeps its text container across frames and is only rebuilt when the text or
- * its layout changes, for text that is rendered every frame. The color is applied when
- * rendering, so changing it does not rebuild the container.
+ * 跨帧保留文本容器、仅在文本或布局变化时重建的文本，用于每帧渲染的文本。
+ * 颜色在渲染时应用，因此修改颜色不会重建容器。
  *
- * The container must be released with @link Reset @endlink before the text render drops
- * its containers, which happens on window resize and language change.
+ * 容器必须在文本渲染丢弃其容器前用 @link Reset @endlink 释放，
+ * 这发生在窗口大小变化与语言切换时。
  */
 class CCachedText
 {
@@ -317,12 +485,18 @@ class CCachedText
 	int m_CursorFlags = 0;
 	STextBoundingBox m_BoundingBox = {0.0f, 0.0f, 0.0f, 0.0f};
 	float m_MaxCharacterHeight = 0.0f;
+	// 记录创建容器的渲染器，析构时才能归还容器；仅 Update 成功创建后非空。
+	ITextRender *m_pTextContainerOwner = nullptr;
 
 public:
 	CCachedText() = default;
-	// Copying would leave two owners for the same text container.
+	// 复制会导致两个所有者共享同一个文本容器。
 	CCachedText(const CCachedText &) = delete;
 	CCachedText &operator=(const CCachedText &) = delete;
+	// 析构必须归还容器：CUi::RenderTime 等便捷重载会在栈上创建临时对象，
+	// 漏归还的容器会一直留在文本渲染器的容器表里（use_count 归 1），
+	// 下次窗口尺寸/UI 缩放变化时触发 text.cpp 的“container was forgotten”断言。
+	~CCachedText();
 
 	void Update(ITextRender *pTextRender, const char *pText, float FontSize, float LineWidth = -1.0f, int CursorFlags = TEXTFLAG_RENDER);
 	void Render(ITextRender *pTextRender, vec2 Pos, ColorRGBA Color) const;
@@ -332,6 +506,141 @@ public:
 	float MaxCharacterHeight() const { return m_MaxCharacterHeight; }
 };
 
+struct SPopupMenuProperties
+{
+	bool m_Draggable = false;
+	int m_Corners = IGraphics::CORNER_ALL;
+	ColorRGBA m_BorderColor = ColorRGBA(0.5f, 0.5f, 0.5f, 0.75f);
+	ColorRGBA m_BackgroundColor = ColorRGBA(0.0f, 0.0f, 0.0f, 0.75f);
+	bool m_AutoReposition = true;
+	// 二级界面大弹窗：打开时在当前视口内居中显示，不锚定触发元素；
+	// 搭配 m_BlockUnderlyingScroll / m_BlockUnderlyingPointerInput 锁定下层页面的滚动与指针交互。
+	bool m_CenterInViewport = false;
+	// 开关缩放动画：入场从 92% 放大到 100%，出场收缩渐隐后移除；
+	// 仅二级界面大弹窗启用，经典下拉/消息弹窗默认关闭零影响。
+	bool m_Animate = false;
+	bool m_ClipToViewport = false;
+	bool m_BlockUnderlyingScroll = false;
+	bool m_BlockUnderlyingPointerInput = false;
+	bool m_RequireSourceRefresh = false;
+	// 二级面板关闭后仅在来源控件重新参与渲染时恢复焦点。
+	bool m_ReturnFocus = false;
+	bool m_IgnoreOpeningClick = false;
+	float m_ContentInset = -1.0f;
+	std::function<void()> m_OnClosed;
+	// 使用 CUi::PopupSourceFrame()，主循环 PerfFrame 不代表实际 UI 更新次数。
+	uint64_t m_SourceFrame = 0;
+	CUIRect m_Viewport{};
+	// 有效时弹窗外框同时包裹该锚点矩形（如下拉框的触发按钮），边框把按钮
+	// 与列表画成一个整体；仅当锚点与弹窗水平对齐时才实际包裹。
+	bool m_HasAnchorSurface = false;
+	CUIRect m_AnchorSurface{};
+};
+
+enum class EUiWheelOwnerPriority
+{
+	PAGE = 0,
+	COMPOSITE_CONTROL = 1,
+	POPUP = 2,
+};
+
+constexpr bool QmHotScrollRegionPriorityWins(EUiWheelOwnerPriority Current, EUiWheelOwnerPriority Candidate)
+{
+	return static_cast<int>(Candidate) >= static_cast<int>(Current);
+}
+
+class CScrollWheelOwnership
+{
+public:
+	bool BeginFrame(uint64_t FrameId, float RawDelta, bool AltPressed)
+	{
+		if(FrameStarted(FrameId))
+			return false;
+		m_vOwners.clear();
+		m_FrameId = FrameId;
+		m_RawDelta = RawDelta * (AltPressed ? 3.0f : 1.0f);
+		m_NextOrder = 0;
+		m_HasFrame = true;
+		m_Consumed = false;
+		return true;
+	}
+
+	bool FrameStarted(uint64_t FrameId) const { return m_HasFrame && m_FrameId == FrameId; }
+
+	void Register(const void *pOwnerId, EUiWheelOwnerPriority Priority, bool Eligible)
+	{
+		if(pOwnerId == nullptr)
+			return;
+		const auto It = std::find_if(m_vOwners.begin(), m_vOwners.end(), [pOwnerId](const SOwner &Owner) { return Owner.m_pId == pOwnerId; });
+		if(It != m_vOwners.end())
+		{
+			It->m_Priority = Priority;
+			It->m_Eligible = Eligible;
+			It->m_Order = ++m_NextOrder;
+			return;
+		}
+		m_vOwners.push_back({pOwnerId, Priority, ++m_NextOrder, Eligible});
+	}
+
+	bool TryConsume(const void *pOwnerId, float *pDelta)
+	{
+		if(pOwnerId == nullptr || pDelta == nullptr || m_Consumed || m_RawDelta == 0.0f)
+			return false;
+		const SOwner *pWinner = nullptr;
+		for(const SOwner &Owner : m_vOwners)
+		{
+			if(!Owner.m_Eligible)
+				continue;
+			if(pWinner == nullptr || static_cast<int>(Owner.m_Priority) > static_cast<int>(pWinner->m_Priority) ||
+				(Owner.m_Priority == pWinner->m_Priority && Owner.m_Order > pWinner->m_Order))
+				pWinner = &Owner;
+		}
+		if(pWinner == nullptr || pWinner->m_pId != pOwnerId)
+			return false;
+		*pDelta = m_RawDelta;
+		m_Consumed = true;
+		return true;
+	}
+
+private:
+	struct SOwner
+	{
+		const void *m_pId = nullptr;
+		EUiWheelOwnerPriority m_Priority = EUiWheelOwnerPriority::PAGE;
+		uint64_t m_Order = 0;
+		bool m_Eligible = false;
+	};
+
+	std::vector<SOwner> m_vOwners;
+	uint64_t m_FrameId = 0;
+	float m_RawDelta = 0.0f;
+	uint64_t m_NextOrder = 0;
+	bool m_HasFrame = false;
+	bool m_Consumed = false;
+};
+
+struct SQmWheelOwnerCandidate
+{
+	const void *m_pOwnerId = nullptr;
+	EUiWheelOwnerPriority m_Priority = EUiWheelOwnerPriority::PAGE;
+	CUIRect m_HotRect{};
+	bool m_Eligible = false;
+};
+
+inline void QmRegisterWheelOwnerCandidate(CScrollWheelOwnership &Ownership, const SQmWheelOwnerCandidate &Candidate, const vec2 &PointerPosition, bool UiEnabled)
+{
+	const bool PointerInside =
+		PointerPosition.x >= Candidate.m_HotRect.x &&
+		PointerPosition.x <= Candidate.m_HotRect.x + Candidate.m_HotRect.w &&
+		PointerPosition.y >= Candidate.m_HotRect.y &&
+		PointerPosition.y <= Candidate.m_HotRect.y + Candidate.m_HotRect.h;
+	Ownership.Register(Candidate.m_pOwnerId, Candidate.m_Priority, Candidate.m_Eligible && UiEnabled && PointerInside);
+}
+
+inline bool QmTryConsumeWheel(CScrollWheelOwnership &Ownership, const void *pOwnerId, float *pDelta)
+{
+	return Ownership.TryConsume(pOwnerId, pDelta);
+}
 class CUi
 {
 public:
@@ -394,14 +703,82 @@ public:
 	};
 
 private:
+	struct SQuadBatchRectContainer
+	{
+		float m_Width = 0.0f;
+		float m_Height = 0.0f;
+		float m_Rounding = 0.0f;
+		int m_Corners = 0;
+		int m_QuadContainerIndex = -1;
+	};
+
+	uint64_t m_QmFrame = 1;
+	bool m_UseGraphicsScreenAspect = true;
 	bool m_Enabled;
+	int m_RenderOnlyDepth = 0;
+	int m_BackgroundRenderDepth = 0;
+	int m_ContentDrawDepth = 0;
+	int m_PreLayoutInputDepth = 0;
+	float m_DropDownFontSize = -1.0f;
+	// 仅客户端绑定；地图编辑器保留自己的控件样式。
+	CUiV2AnimationRuntime *m_pQmAnimationRuntime = nullptr;
+	CTooltips *m_pQmTooltips = nullptr;
+	bool m_CardLabelHintsEnabled = false;
+	SUiTheme m_QmControlTheme{};
+	std::array<unsigned, 8> m_aQmControlThemeConfig{};
+	bool m_HasQmControlTheme = false;
+	mutable int m_QuadBatchDepth = 0;
+	mutable int m_QuadBatchContainerIndex = -1;
+	mutable ColorRGBA m_QuadBatchColor = ColorRGBA(1.0f, 1.0f, 1.0f, 1.0f);
+	mutable std::vector<IGraphics::SRenderSpriteInfo> m_vQuadBatchSprites;
+	mutable std::vector<SQuadBatchRectContainer> m_vQuadBatchRectContainers;
+	std::vector<float> m_vGaussianBlurScopeAlphas;
+	int m_GaussianBlurSuppressionDepth = 0;
+	IGraphics::CRenderTargetHandle m_GaussianBlurSource;
+	std::array<IGraphics::CRenderTargetHandle, IGraphics::DUAL_KAWASE_PYRAMID_LEVELS> m_aGaussianBlurTemporary;
+	IGraphics::CRenderTargetHandle m_GaussianBlurTarget;
+	int m_GaussianBlurWidth = 0;
+	int m_GaussianBlurHeight = 0;
+	int m_GaussianBlurMode = -1;
+	bool m_GaussianBlurPrepared = false;
+	uint64_t m_GaussianBlurPreparedFrame = 0;
+	// 同帧失败闩：捕获/模糊在某一帧失败后，同帧后续矩形直接跳过重试，
+	// 避免对同一帧反复 FlushQuadBatch + 背板捕获 + 模糊提交（失败风暴）。
+	uint64_t m_GaussianBlurFailedFrame = 0;
 
 	const void *m_pHotItem = nullptr;
 	const void *m_pActiveItem = nullptr;
 	const void *m_pLastActiveItem = nullptr; // only used internally to track active CLineInput
+	const void *m_pInteractionContext = nullptr;
+	const char *m_pInteractionCardId = nullptr;
+	const SPopupMenuId *m_pRenderingPopupId = nullptr;
+	CLineInput *m_pTrackedTextInput = nullptr;
+	const SPopupMenuId *m_pTrackedTextPopupId = nullptr;
+	CQmUiInteractionSource m_TextInputSource;
+	struct SPopupFocus
+	{
+		const void *m_pItem = nullptr;
+		CLineInput *m_pTextInput = nullptr;
+		const SPopupMenuId *m_pPopupId = nullptr;
+		CQmUiInteractionSource m_Source;
+		uint64_t m_Frame = 0;
+	};
+	SPopupFocus m_KeyboardFocus;
+	SPopupFocus m_PendingPopupFocus;
+	void RestorePopupFocus(const void *pId, CLineInput *pLineInput = nullptr);
+	void QueuePopupFocusRestore(const SPopupFocus &Focus);
+	void TrackActiveTextInput(CLineInput *pLineInput);
+	void ReleaseTrackedTextInput();
+	void PruneInteractionSources(bool AllowPreviousFrame);
+	friend class CUiScopedInteractionOwner;
 	const void *m_pBecomingHotItem = nullptr;
 	CScrollRegion *m_pHotScrollRegion = nullptr;
 	CScrollRegion *m_pBecomingHotScrollRegion = nullptr;
+	EUiWheelOwnerPriority m_BecomingHotScrollRegionPriority = EUiWheelOwnerPriority::PAGE;
+	bool m_UnderlyingScrollBlocked = false;
+	bool m_RenderingPopupMenus = false;
+	bool m_MenuUiFirstWheelPerf = false;
+	CScrollWheelOwnership m_WheelOwnership;
 	bool m_ActiveItemValid = false;
 
 	int m_ActiveButtonLogicButton = -1;
@@ -460,6 +837,7 @@ private:
 	std::function<void()> m_OnBackButtonPressedFunction;
 
 	CUIRect m_Screen;
+	int m_LastUiScale = -1;
 
 	std::vector<CUIRect> m_vClips;
 	void UpdateClipping();
@@ -468,15 +846,35 @@ private:
 	{
 		static constexpr float POPUP_BORDER = 1.0f;
 		static constexpr float POPUP_MARGIN = 4.0f;
+		// 开关缩放动画时长（秒）：入场放大 + 出场收缩。
+		static constexpr float POPUP_OPEN_DURATION = 0.12f;
+		static constexpr float POPUP_CLOSE_DURATION = 0.09f;
 
 		const SPopupMenuId *m_pId;
 		SPopupMenuProperties m_Props;
+		CQmUiInteractionSource m_Source;
+		SPopupFocus m_ReturnFocus;
+		uint64_t m_OpenedFrame = 0;
+		bool m_Dragging = false;
+		vec2 m_DragOffset = vec2(0.0f, 0.0f);
 		CUIRect m_Rect;
 		void *m_pContext;
 		FPopupMenuFunction m_pfnFunc;
+		// 动画状态（仅 m_Props.m_Animate 弹窗使用）：
+		// m_OpenStart < 0 表示无入场动画；m_Closing 表示逻辑已关闭、
+		// 正在播放出场动画（期间不参与任何输入判定），结束后移除。
+		float m_OpenStart = -1.0f;
+		bool m_Closing = false;
+		float m_CloseStart = 0.0f;
 	};
 	std::vector<SPopupMenu> m_vPopupMenus;
+	std::vector<std::weak_ptr<SQmUiSelectionCommit>> m_vPendingSelections;
+	void RegisterSelectionCommit(std::shared_ptr<SQmUiSelectionCommit> &pCommit);
+	CQmPopupSourceClock m_PopupSourceClock;
 	FPopupMenuClosedCallback m_pfnPopupMenuClosedCallback = nullptr;
+	int m_PopupInputDepth = 0;
+	bool UnderlyingPointerInputBlocked() const;
+	bool WheelInputBlocked(const void *pOwnerId) const;
 
 	static CUi::EPopupMenuFunctionResult PopupMessage(void *pContext, CUIRect View, bool Active);
 	static CUi::EPopupMenuFunctionResult PopupConfirm(void *pContext, CUIRect View, bool Active);
@@ -487,9 +885,29 @@ private:
 	IGraphics *m_pGraphics;
 	IInput *m_pInput;
 	ITextRender *m_pTextRender;
+	float m_BackgroundAlphaScale = 1.0f;
+	float m_ControlAlphaScale = 1.0f;
+	struct SQmCachedIconLabel
+	{
+		std::string m_Text;
+		float m_FontSize;
+		float m_PixelScale;
+		float m_PixelScaleX;
+		int m_Weight;
+		EFontPreset m_Preset;
+		unsigned m_Flags;
+		STextContainerIndex m_Container;
+		vec2 m_Size;
+		float m_BiggestCharacterHeight;
+	};
+	mutable std::vector<SQmCachedIconLabel> m_vQmCachedIconLabels;
+	bool DrawCachedQmIconLabel(const CUIRect &Rect, const char *pText, float Size, int Align, int Count) const;
 
 	std::vector<CUIElement *> m_vpOwnUIElements; // ui elements maintained by CUi class
 	std::vector<CUIElement *> m_vpUIElements;
+
+	int QuadBatchRectContainer(float Width, float Height, float Rounding, int Corners) const;
+	void RenderQuadContainerBatchable(int QuadContainerIndex, float X, float Y, const ColorRGBA &Color) const;
 
 public:
 	static const CLinearScrollbarScale ms_LinearScrollbarScale;
@@ -502,9 +920,36 @@ public:
 
 	void Init(IKernel *pKernel);
 	IClient *Client() const { return m_pClient; }
+	void BeginQmFrame() { ++m_QmFrame; }
+	void SetUseGraphicsScreenAspect(bool Use) { m_UseGraphicsScreenAspect = Use; }
+	uint64_t PopupSourceFrame() const { return m_PopupSourceClock.Frame(); }
+	void RefreshInteractionSource(const void *pContext, const char *pCardId);
+	void CloseInteractionSource(const void *pContext, const char *pCardId);
+	bool HasPendingInteractionSelection() const;
+	bool ConsumeMenuUiFirstWheelPerf()
+	{
+		const bool Result = m_MenuUiFirstWheelPerf;
+		m_MenuUiFirstWheelPerf = false;
+		return Result;
+	}
 	IGraphics *Graphics() const { return m_pGraphics; }
 	IInput *Input() const { return m_pInput; }
 	ITextRender *TextRender() const { return m_pTextRender; }
+	// 背景透明度只作用于页面及轨道；控件自身颜色只乘父层显隐系数。
+	float ControlAlphaScale() const { return m_ControlAlphaScale; }
+	void SetControlAlphaScale(float AlphaScale) { m_ControlAlphaScale = std::clamp(AlphaScale, 0.0f, 1.0f); }
+	ColorRGBA ScaleControlAlpha(ColorRGBA Color) const
+	{
+		Color.a *= m_ControlAlphaScale;
+		return Color;
+	}
+	float BackgroundAlphaScale() const { return m_BackgroundAlphaScale; }
+	void SetBackgroundAlphaScale(float AlphaScale) { m_BackgroundAlphaScale = std::clamp(AlphaScale, 0.0f, 1.0f); }
+	ColorRGBA ScaleBackgroundAlpha(ColorRGBA Color) const
+	{
+		Color.a *= m_BackgroundAlphaScale;
+		return Color;
+	}
 
 	CUi();
 	~CUi();
@@ -532,12 +977,78 @@ public:
 	CUIElement *GetNewUIElement(int RequestedRectCount);
 
 	void AddUIElement(CUIElement *pElement);
+	void RemoveUIElement(CUIElement *pElement);
+	void OnShutdown();
 	void OnElementsReset();
 	void OnWindowResize();
 	void OnCursorMove(float X, float Y);
+	void BeginGaussianBlurScope(float Alpha = 1.0f);
+	void EndGaussianBlurScope();
+	void BeginGaussianBlurSuppression() { ++m_GaussianBlurSuppressionDepth; }
+	void EndGaussianBlurSuppression();
+	bool GaussianBlurScopeActive() const { return !m_vGaussianBlurScopeAlphas.empty() && m_GaussianBlurSuppressionDepth == 0; }
+	float GaussianBlurScopeAlpha() const { return GaussianBlurScopeActive() ? m_vGaussianBlurScopeAlphas.back() : 0.0f; }
+	void RenderGaussianBlur(const CUIRect &Rect, float Alpha = 1.0f, int Corners = IGraphics::CORNER_NONE, float Rounding = 0.0f);
+
+	// 供 HUD Dynamic Island 等外部消费者复用同一份模糊结果。准备按 PerfFrame 缓存，
+	// 目标内容在两次准备之间保持不变；句柄随窗口尺寸/开关销毁重建，消费方须每帧重新取用。
+	void DestroyGaussianBlurTargets();
+	bool PrepareGaussianBlur();
+	bool GaussianBlurTargetReady() const { return m_GaussianBlurPrepared && m_GaussianBlurTarget.IsValid(); }
+	IGraphics::CRenderTargetHandle GaussianBlurTarget() const { return m_GaussianBlurTarget; }
 
 	void SetEnabled(bool Enabled) { m_Enabled = Enabled; }
 	bool Enabled() const { return m_Enabled; }
+	void BeginRenderOnly();
+	void EndRenderOnly();
+	void BeginBackgroundRender(bool ContentDraw = false)
+	{
+		++m_BackgroundRenderDepth;
+		if(ContentDraw)
+			++m_ContentDrawDepth;
+	}
+	void EndBackgroundRender(bool ContentDraw = false)
+	{
+		if(m_BackgroundRenderDepth > 0)
+			--m_BackgroundRenderDepth;
+		if(ContentDraw && m_ContentDrawDepth > 0)
+			--m_ContentDrawDepth;
+	}
+	// 文本预热不绘制外观；后台绘制保留外观，但同样禁止交互。
+	bool MeasurementOnly() const { return m_RenderOnlyDepth > 0; }
+	bool BackgroundRender() const { return m_BackgroundRenderDepth > 0; }
+	// 预布局允许输入和测量，但不能重复提交半透明控件。
+	bool DrawingSuppressed() const { return m_RenderOnlyDepth > 0 || PreLayoutInput(); }
+	bool RenderOnly() const { return m_RenderOnlyDepth > 0 || m_BackgroundRenderDepth > 0; }
+	// 内容 DRAW 保留控件反馈；真正的下层菜单、测量和活动弹层仍屏蔽反馈。
+	bool VisualMouseHovered(const CUIRect *pRect) const
+	{
+		return m_RenderOnlyDepth == 0 && m_ContentDrawDepth == m_BackgroundRenderDepth && !UnderlyingPointerInputBlocked() && MouseInside(pRect) && MouseInsideClip();
+	}
+	void BeginPreLayoutInput() { ++m_PreLayoutInputDepth; }
+	void EndPreLayoutInput()
+	{
+		if(m_PreLayoutInputDepth > 0)
+			--m_PreLayoutInputDepth;
+	}
+	bool PreLayoutInput() const { return m_PreLayoutInputDepth > 0; }
+	void SetDropDownFontSize(float FontSize) { m_DropDownFontSize = FontSize; }
+	void SetQmAnimationRuntime(CUiV2AnimationRuntime *pRuntime) { m_pQmAnimationRuntime = pRuntime; }
+	CUiV2AnimationRuntime *QmAnimationRuntime() const { return m_pQmAnimationRuntime; }
+	void SetQmTooltips(CTooltips *pTooltips) { m_pQmTooltips = pTooltips; }
+	bool CardLabelHintsEnabled() const { return m_CardLabelHintsEnabled; }
+	void SetCardLabelHintsEnabled(bool Enabled) { m_CardLabelHintsEnabled = Enabled; }
+	const char *PrepareCardLabel(const CUIRect *pRect, const char *pText, bool Render = true) const;
+	void DoConfigTooltip(const void *pId, const CUIRect *pRect, const void *pValue, const void *pSecondValue = nullptr);
+	void DoButtonTooltip(const void *pId, const CUIRect *pRect, const char *pText);
+	void SetKeyboardFocus(const void *pId);
+	const void *KeyboardFocusItem() const { return m_KeyboardFocus.m_pItem; }
+	int DoButtonGroupKeyboard(const void *const *ppIds, const bool *pEnabled, int Count);
+	void DoTooltip(const void *pId, const CUIRect *pNearRect, const char *pText, float WidthHint = -1.0f);
+	void DoSmallTooltip(const void *pId, const CUIRect *pNearRect, const char *pText, float FontSize = 12.0f, float WidthHint = -1.0f);
+	CTooltips *QmTooltips() const { return m_pQmTooltips; }
+	const SUiTheme &QmControlTheme();
+	float DropDownFontSize() const { return m_DropDownFontSize; }
 	void Update();
 	void DebugRender(float X, float Y);
 
@@ -549,9 +1060,10 @@ public:
 	float MouseDeltaY() const { return m_MouseDelta.y; }
 	vec2 UpdatedMousePos() const { return m_UpdatedMousePos; }
 	vec2 UpdatedMouseDelta() const { return m_UpdatedMouseDelta; }
-	int LastMouseButton(int Index) const { return (m_LastMouseButtons >> Index) & 1; } // TClient
-	int MouseButton(int Index) const { return (m_MouseButtons >> Index) & 1; }
-	int MouseButtonClicked(int Index) const { return MouseButton(Index) && !((m_LastMouseButtons >> Index) & 1); }
+	bool PointerInputBlocked() const { return UnderlyingPointerInputBlocked(); }
+	int LastMouseButton(int Index) const { return QmResolvePointerButtons(m_MouseButtons, m_LastMouseButtons, UnderlyingPointerInputBlocked()).Previous(Index); }
+	int MouseButton(int Index) const { return QmResolvePointerButtons(m_MouseButtons, m_LastMouseButtons, UnderlyingPointerInputBlocked()).Held(Index); }
+	int MouseButtonClicked(int Index) const { return QmResolvePointerButtons(m_MouseButtons, m_LastMouseButtons, UnderlyingPointerInputBlocked()).Pressed(Index); }
 	bool CheckMouseLock()
 	{
 		if(m_MouseLock && ActiveItem() != m_pMouseLockId)
@@ -565,16 +1077,40 @@ public:
 	}
 	void DisableMouseLock() { m_MouseLock = false; }
 
-	void SetHotItem(const void *pId) { m_pBecomingHotItem = pId; }
+	void SetHotItem(const void *pId)
+	{
+		if(RenderOnly())
+			return;
+		m_pBecomingHotItem = pId;
+	}
 	void SetActiveItem(const void *pId)
 	{
+		if(RenderOnly())
+			return;
 		m_ActiveItemValid = true;
 		m_pActiveItem = pId;
 		if(pId)
 			m_pLastActiveItem = pId;
 	}
+	void ReleaseActiveTextInput(CLineInput *pLineInput)
+	{
+		m_ActiveItemValid = true;
+		if(m_pActiveItem == pLineInput)
+			m_pActiveItem = nullptr;
+		if(m_pLastActiveItem == pLineInput)
+			m_pLastActiveItem = nullptr;
+		pLineInput->Deactivate();
+		if(m_pTrackedTextInput == pLineInput)
+		{
+			m_pTrackedTextInput = nullptr;
+			m_pTrackedTextPopupId = nullptr;
+			m_TextInputSource = {};
+		}
+	}
 	bool CheckActiveItem(const void *pId)
 	{
+		if(UnderlyingPointerInputBlocked())
+			return false;
 		if(m_pActiveItem == pId)
 		{
 			m_ActiveItemValid = true;
@@ -582,11 +1118,37 @@ public:
 		}
 		return false;
 	}
-	void SetHotScrollRegion(CScrollRegion *pId) { m_pBecomingHotScrollRegion = pId; }
+	bool IsActiveItem(const void *pId) const { return m_pActiveItem == pId; }
+	void SetHotScrollRegion(CScrollRegion *pId, EUiWheelOwnerPriority Priority = EUiWheelOwnerPriority::PAGE)
+	{
+		if(RenderOnly())
+			return;
+		if(pId == nullptr)
+		{
+			m_pBecomingHotScrollRegion = nullptr;
+			m_BecomingHotScrollRegionPriority = EUiWheelOwnerPriority::PAGE;
+		}
+		else if(m_pBecomingHotScrollRegion == nullptr || QmHotScrollRegionPriorityWins(m_BecomingHotScrollRegionPriority, Priority))
+		{
+			m_pBecomingHotScrollRegion = pId;
+			m_BecomingHotScrollRegionPriority = Priority;
+		}
+	}
 	const void *HotItem() const { return m_pHotItem; }
 	const void *NextHotItem() const { return m_pBecomingHotItem; }
 	const void *ActiveItem() const { return m_pActiveItem; }
 	const CScrollRegion *HotScrollRegion() const { return m_pHotScrollRegion; }
+	const CScrollRegion *NextHotScrollRegion() const { return m_pBecomingHotScrollRegion; }
+	bool UnderlyingScrollBlocked() const { return m_UnderlyingScrollBlocked; }
+	bool RenderingPopupMenus() const { return m_RenderingPopupMenus; }
+	void BeginWheelOwnershipFrame();
+	// 原始输入入口与客户端采集共用帧初始化，允许隔离设备后驱动跨帧 UI 行为。
+	bool BeginWheelOwnershipFrame(uint64_t FrameId, float RawDelta, bool AltPressed)
+	{
+		return m_WheelOwnership.BeginFrame(FrameId, RawDelta, AltPressed);
+	}
+	void RegisterWheelOwner(const void *pOwnerId, EUiWheelOwnerPriority Priority, const CUIRect &HotRect, bool Eligible);
+	bool TryConsumeWheel(const void *pOwnerId, float *pDelta);
 
 	void StartCheck() { m_ActiveItemValid = false; }
 	void FinishCheck()
@@ -601,7 +1163,8 @@ public:
 
 	bool MouseInside(const CUIRect *pRect) const;
 	bool MouseInsideClip() const { return !IsClipped() || MouseInside(ClipArea()); }
-	bool MouseHovered(const CUIRect *pRect) const { return MouseInside(pRect) && MouseInsideClip(); }
+	bool MouseHovered(const CUIRect *pRect) const;
+	void RegisterPassiveHotItem(const void *pId, const CUIRect *pRect);
 	void ConvertMouseMove(float *pX, float *pY, IInput::ECursorType CursorType) const;
 	void UpdateTouchState(CTouchState &State) const;
 	void SetMouseSlow(bool MouseSlow) { m_MouseSlow = MouseSlow; }
@@ -622,7 +1185,13 @@ public:
 	void ClipEnable(const CUIRect *pRect);
 	void ClipDisable();
 	const CUIRect *ClipArea() const;
+	const CUIRect *OutermostClipArea() const;
 	bool IsClipped() const { return !m_vClips.empty(); }
+	void BeginQuadBatch() const;
+	void FlushQuadBatch() const;
+	void EndQuadBatch() const;
+	bool IsQuadBatchActive() const { return m_QuadBatchDepth > 0; }
+	void RenderBatchableRect(const CUIRect *pRect, ColorRGBA Color, int Corners, float Rounding) const;
 
 	int DoButtonLogic(const void *pId, int Checked, const CUIRect *pRect, unsigned Flags);
 	int DoDraggableButtonLogic(const void *pId, int Checked, const CUIRect *pRect, bool *pClicked, bool *pAbrupted);
@@ -631,11 +1200,33 @@ public:
 	void DoSmoothScrollLogic(float *pScrollOffset, float *pScrollOffsetChange, float ViewPortSize, float TotalSize, bool SmoothClamp = false, float ScrollSpeed = 10.0f) const;
 	static vec2 CalcAlignedCursorPos(const CUIRect *pRect, vec2 TextSize, int Align, const float *pBiggestCharHeight = nullptr);
 
+	// 定位文字与控件共用绘制隔离；保留后台预览的原始坐标。
+	void DoText(float X, float Y, float Size, const char *pText, float LineWidth = -1.0f) const;
 	CLabelResult DoLabel(const CUIRect *pRect, const char *pText, float Size, int Align, const SLabelProperties &LabelProps = {}) const;
 	CLabelResult DoLabel_AutoLineSize(const char *pText, float FontSize, int Align, CUIRect *pRect, float LineSize, const SLabelProperties &LabelProps = {}) const;
+	int GetLabelFlagsForProperties(const SLabelProperties &LabelProps, const CTextCursor *pReadCursor = nullptr) const;
+
+	struct SEditBoxRenderOptions
+	{
+		SEditBoxRenderOptions() :
+			m_DrawBackground(true),
+			m_pHitRect(nullptr),
+			m_ReleaseFocusOnEnter(true),
+			m_ProcessInput(true)
+		{
+		}
+
+		bool m_DrawBackground;
+		const CUIRect *m_pHitRect;
+		// 编辑器等调用者需要保留焦点与确认热键，供外层执行数值／命令提交。
+		bool m_ReleaseFocusOnEnter;
+		// 输入权限与文字排版分离，禁用编辑仍使用相同内边距和滚动偏移。
+		bool m_ProcessInput;
+	};
 
 	void DoLabel(CUIElement::SUIElementRect &RectEl, const CUIRect *pRect, const char *pText, float Size, int Align, const SLabelProperties &LabelProps = {}, int StrLen = -1, const CTextCursor *pReadCursor = nullptr) const;
-	void DoLabelStreamed(CUIElement::SUIElementRect &RectEl, const CUIRect *pRect, const char *pText, float Size, int Align, const SLabelProperties &LabelProps = {}, int StrLen = -1, const CTextCursor *pReadCursor = nullptr) const;
+	void RenderLabelTextContainerAligned(const CUIElement::SUIElementRect &RectEl, const CUIRect *pRect, int Align) const;
+	void DoLabelStreamed(CUIElement::SUIElementRect &RectEl, const CUIRect *pRect, const char *pText, float Size, int Align, const SLabelProperties &LabelProps = {}, int StrLen = -1, const CTextCursor *pReadCursor = nullptr, bool Render = true, bool *pTextContainerRecreated = nullptr) const;
 
 	/**
 	 * Creates an input field.
@@ -653,7 +1244,9 @@ public:
 	 *
 	 * @return true if the value of the input field changed since the last call.
 	 */
-	bool DoEditBox(CLineInput *pLineInput, const CUIRect *pRect, float FontSize, int Corners = IGraphics::CORNER_ALL, const std::vector<STextColorSplit> &vColorSplits = {});
+	bool DoEditBox(CLineInput *pLineInput, const CUIRect *pRect, float FontSize, int Corners = IGraphics::CORNER_ALL, const std::vector<STextColorSplit> &vColorSplits = {}, int Align = TEXTALIGN_ML);
+	bool DoEditBox(CLineInput *pLineInput, const CUIRect *pRect, float FontSize, int Corners, const std::vector<STextColorSplit> &vColorSplits, int Align, const SEditBoxRenderOptions &RenderOptions);
+	bool DoEditBoxMultiLine(CLineInput *pLineInput, const CUIRect *pRect, float FontSize, float LineSpacing, int TextAlign = TEXTALIGN_TL, const SEditBoxRenderOptions &RenderOptions = {});
 
 	/**
 	 * Creates an input field with a clear [x] button attached to it.
@@ -672,6 +1265,7 @@ public:
 	 * @return true if the value of the input field changed since the last call.
 	 */
 	bool DoClearableEditBox(CLineInput *pLineInput, const CUIRect *pRect, float FontSize, int Corners = IGraphics::CORNER_ALL, const std::vector<STextColorSplit> &vColorSplits = {});
+	bool DoClearableEditBox(CLineInput *pLineInput, const CUIRect *pRect, float FontSize, int Corners, const std::vector<STextColorSplit> &vColorSplits, const SEditBoxRenderOptions &RenderOptions);
 
 	/**
 	 * Creates an input field with a search icon and a clear [x] button attached to it.
@@ -690,12 +1284,26 @@ public:
 	 * @return true if the value of the input field changed since the last call.
 	 */
 	bool DoEditBox_Search(CLineInput *pLineInput, const CUIRect *pRect, float FontSize, bool HotkeyEnabled);
+	bool DoEditBox_Search(CLineInput *pLineInput, const CUIRect *pRect, float FontSize, bool HotkeyEnabled, const SEditBoxRenderOptions &RenderOptions);
 
 	int DoButton_Menu(CUIElement &UIElement, const CButtonContainer *pId, const std::function<const char *()> &GetTextLambda, const CUIRect *pRect, const SMenuButtonProperties &Props = {});
-	void DrawButton_FontIcon(const char *pText, const CUIRect *pRect, ColorRGBA Color, int Corners = IGraphics::CORNER_ALL, bool Enabled = true) const;
+	void DrawButton_FontIcon(const char *pText, const CUIRect *pRect, ColorRGBA Color, int Corners = IGraphics::CORNER_ALL, bool Enabled = true);
 	int DoButton_FontIcon(CButtonContainer *pButtonContainer, const char *pText, int Checked, const CUIRect *pRect, unsigned Flags, int Corners = IGraphics::CORNER_ALL, bool Enabled = true, std::optional<ColorRGBA> ButtonColor = std::nullopt);
+	// 图集优先、字形回退的图标绘制：pFallbackIcon 为 FontIcons::FONT_ICON_* 字形。
+	bool DrawQmIcon(const CUIRect &Rect, EQmIcon Icon, const char *pFallbackIcon, const ColorRGBA &Color = ColorRGBA(1.0f, 1.0f, 1.0f, 1.0f)) const;
+	bool DrawQmIconAt(float x, float y, float Size, EQmIcon Icon, const char *pFallbackIcon, const ColorRGBA &Color = ColorRGBA(1.0f, 1.0f, 1.0f, 1.0f)) const
+	{
+		CUIRect Rect;
+		Rect.x = x;
+		Rect.y = y;
+		Rect.w = Size;
+		Rect.h = Size;
+		return DrawQmIcon(Rect, Icon, pFallbackIcon, Color);
+	}
+	CLabelResult DoLabel_QmIcon(const CUIRect *pRect, EQmIcon Icon, const char *pFallbackIcon, float Size, int Align, const SLabelProperties &LabelProps = {}) const;
+	int DoButton_QmIcon(CButtonContainer *pButtonContainer, EQmIcon Icon, const char *pFallbackIcon, int Checked, const CUIRect *pRect, unsigned Flags, int Corners = IGraphics::CORNER_ALL, bool Enabled = true, std::optional<ColorRGBA> ButtonColor = std::nullopt, bool ShowSlash = false);
 	// only used for popup menus
-	int DoButton_PopupMenu(CButtonContainer *pButtonContainer, const char *pText, const CUIRect *pRect, float Size, int Align, float Padding = 0.0f, bool TransparentInactive = false, bool Enabled = true, std::optional<ColorRGBA> ButtonColor = std::nullopt);
+	int DoButton_PopupMenu(CButtonContainer *pButtonContainer, const char *pText, const CUIRect *pRect, float Size, int Align, float Padding = 0.0f, bool TransparentInactive = false, bool Enabled = true, std::optional<ColorRGBA> ButtonColor = std::nullopt, float MinimumFontSize = -1.0f);
 
 	// value selector
 	SEditResult<int64_t> DoValueSelectorWithState(const void *pId, const CUIRect *pRect, const char *pLabel, int64_t Current, int64_t Min, int64_t Max, const SValueSelectorProperties &Props = {});
@@ -710,14 +1318,21 @@ public:
 		SCROLLBAR_OPTION_DELAYUPDATE = 1 << 3,
 	};
 	float DoScrollbarV(const void *pId, const CUIRect *pRect, float Current);
+	void RenderScrollbarH(const void *pId, const CUIRect *pRect, float Current, const ColorRGBA *pColorInner = nullptr);
 	float DoScrollbarH(const void *pId, const CUIRect *pRect, float Current, const ColorRGBA *pColorInner = nullptr);
-	bool DoScrollbarOption(const void *pId, int *pOption, const CUIRect *pRect, const char *pStr, int Min, int Max, const IScrollbarScale *pScale = &ms_LinearScrollbarScale, unsigned Flags = 0u, const char *pSuffix = "");
+	bool DoScrollbarOption(const void *pId, int *pOption, const CUIRect *pRect, const char *pStr, int Min, int Max, const IScrollbarScale *pScale = &ms_LinearScrollbarScale, unsigned Flags = 0u, const char *pSuffix = "", const char *pMaxText = nullptr);
 
 	// progress bar
 	void RenderProgressBar(CUIRect ProgressBar, float Progress);
 
 	// render time with hundredths or thousands aligned to the right of the UIRect
 	void RenderTime(CUIRect TimeRect, float FontSize, int Seconds, bool NotFinished, int Millis, bool TrueMilliseconds, CCachedText &SecondsText, CCachedText &MillisText, ColorRGBA Color) const;
+	void RenderTime(CUIRect TimeRect, float FontSize, int Seconds, bool NotFinished, int Millis, bool TrueMilliseconds, ColorRGBA Color = ColorRGBA(1.0f, 1.0f, 1.0f, 1.0f)) const
+	{
+		CCachedText SecondsText;
+		CCachedText MillisText;
+		RenderTime(TimeRect, FontSize, Seconds, NotFinished, Millis, TrueMilliseconds, SecondsText, MillisText, Color);
+	}
 
 	// progress spinner
 	void RenderProgressSpinner(vec2 Center, float OuterRadius, const SProgressSpinnerProperties &Props = {}) const;
@@ -729,14 +1344,25 @@ public:
 	// Fired the moment the back button transitions to active (mouse-down inside it).
 	void SetOnBackButtonPressedCallback(std::function<void()> pfnCallback) { m_OnBackButtonPressedFunction = std::move(pfnCallback); }
 
-	// found in ui_popups.cpp
+	// 弹窗实现位于 ui_popups.cpp
+	static constexpr float PopupMenuContentInset() { return (SPopupMenu::POPUP_BORDER + SPopupMenu::POPUP_MARGIN) * 2.0f; }
+	static SPopupMenuProperties SecondaryPanelProperties();
 	void DoPopupMenu(const SPopupMenuId *pId, float X, float Y, float Width, float Height, void *pContext, FPopupMenuFunction pfnFunc, const SPopupMenuProperties &Props = {});
 	void RenderPopupMenus();
-	void ClosePopupMenu(const SPopupMenuId *pId, bool IncludeDescendants = false);
-	void ClosePopupMenus();
+	void ClosePopupMenu(const SPopupMenuId *pId, bool IncludeDescendants = false, bool RestoreFocus = true);
+	void RefreshPopupMenuSource(const SPopupMenuId *pId, bool RequireRefresh, uint64_t Frame);
+	// 输入阶段关闭最上层，避免所属组件延迟绘制前 Escape 泄漏给菜单。
+	bool CloseTopPopupMenu();
+	void ClosePopupMenus(bool RestoreFocus = true);
 	bool IsPopupOpen() const;
 	bool IsPopupOpen(const SPopupMenuId *pId) const;
+	// 包含退场中的弹层，供独立绘制入口延续公共动画生命周期。
+	bool IsPopupVisible(const SPopupMenuId *pId) const;
+	// 返回指定弹窗的当前矩形（UI 屏幕坐标）；弹窗未打开时返回 nullptr。
+	const CUIRect *GetPopupMenuRect(const SPopupMenuId *pId) const;
 	bool IsPopupHovered() const;
+	bool GetPopupPosition(const SPopupMenuId *pId, float &X, float &Y) const;
+	void SetPopupPosition(const SPopupMenuId *pId, float X, float Y);
 	void SetPopupMenuClosedCallback(FPopupMenuClosedCallback pfnCallback);
 
 	struct SMessagePopupContext : public SPopupMenuId
@@ -779,10 +1405,11 @@ public:
 		void Reset();
 		void YesNoButtons();
 	};
-	void ShowPopupConfirm(float X, float Y, SConfirmPopupContext *pContext);
+	void ShowPopupConfirm(float X, float Y, SConfirmPopupContext *pContext, bool CenterInViewport = true);
 
 	struct SSelectionPopupContext : public SPopupMenuId
 	{
+		std::shared_ptr<SQmUiSelectionCommit> m_pCommit;
 		CUi *m_pUI; // set by CUi when popup is shown
 		CScrollRegion *m_pScrollRegion;
 		SPopupMenuProperties m_Props;
@@ -791,15 +1418,36 @@ public:
 		std::vector<CButtonContainer> m_vButtonContainers;
 		const std::string *m_pSelection;
 		int m_SelectionIndex;
+		int m_ActiveIndex;
 		float m_EntryHeight;
 		float m_EntryPadding;
 		float m_EntrySpacing;
 		float m_FontSize;
+		float m_MinimumFontSize = -1.0f;
 		float m_Width;
 		float m_AlignmentHeight;
+		ColorRGBA m_ActiveEntryColor;
+		std::optional<ColorRGBA> m_HoverEntryColor;
 		bool m_TransparentButtons;
+		bool m_AnchorVisible = true;
+		bool m_PopupVisible = true;
+		bool m_BlockUnderlyingScroll = false;
+		bool m_Scrollable = false;
+		bool m_ScrollToActiveItem = false;
+		bool m_MenuUiFirstWheelLogged = false;
+		CUIRect m_Viewport{};
+		SQmDropdownPopupPolicy m_PopupPolicy;
 
 		bool m_SpecialFontRenderMode = false; // TClient
+		// QmClient: 按条目渲染字体前先检查该名字能否解析为已加载的 face（商店
+		// 搜索弹层的条目是未安装的在线字体，缺字时静默跳过切换，避免逐帧失败日志）。
+		bool m_FontFaceAvailabilityCheck = false;
+		// 字体族列表以默认面预览；样式与商店 face 列表保持完整配置名语义。
+		bool m_FontFamilySelection = false;
+		bool m_Searchable = false;
+		bool m_FocusSearch = false;
+		CLineInputBuffered<256> m_SearchInput;
+		CQmDropdownSearch m_Search;
 
 		SSelectionPopupContext();
 		void Reset();
@@ -811,23 +1459,58 @@ public:
 		enum EColorPickerMode
 		{
 			MODE_UNSET = -1,
+			MODE_RECOMMENDED,
 			MODE_HSVA,
 			MODE_RGBA,
 			MODE_HSLA,
 		};
+		// 主取色区形态：方图（SV 平面 + 竖向色相条）或色环（环选色相 + 环内 SV 方图）。
+		enum EColorPickerShape
+		{
+			SHAPE_SQUARE = 0,
+			SHAPE_WHEEL,
+		};
 
 		CUi *m_pUI; // set by CUi when popup is shown
 		EColorPickerMode m_ColorMode = MODE_UNSET;
+		EColorPickerShape m_Shape = SHAPE_SQUARE;
 		bool m_Alpha = false;
 		unsigned int *m_pHslaColor = nullptr; // may be nullptr
 		ColorHSVA m_HsvaColor;
 		ColorRGBA m_RgbaColor;
 		ColorHSLA m_HslaColor;
+		// 打开时快照的初始颜色：确认关闭保持当前值，取消关闭恢复快照。
+		ColorHSVA m_InitialHsvaColor;
+		ColorRGBA m_InitialRgbaColor;
+		ColorHSLA m_InitialHslaColor;
+		// 「我的调色板」工作副本：打开时从 g_Config.m_QmColorPickerPalette 载入，
+		// 每次增删改名即刻序列化回写；全部取色器实例共享同一份配置。
+		std::vector<qm_picker_palette::SSwatch> m_vPalette;
+		int m_RenamingPaletteIndex = -1; // >=0 时对应色块显示为行内改名输入框
+		CLineInput m_RenameInput;
+		char m_aRenameBuffer[qm_picker_palette::MAX_NAME_BYTES];
 		// UI element IDs
 		const char m_HuePickerId = 0;
+		const char m_WheelPickerId = 0;
 		const char m_ColorPickerId = 0;
 		const char m_aValueSelectorIds[5] = {0};
+		// 通道滑条行（H/S/V/L/A 与 Hex）的常驻小输入框：滑条拖动与数值输入双向。
+		char m_aacChannelBuffers[4][8];
+		CLineInput m_aChannelInputs[4];
+		char m_aHexBuffer[16];
+		CLineInput m_HexInput;
 		CButtonContainer m_aModeButtons[(int)MODE_HSLA + 1];
+		CButtonContainer m_ShapeButton;
+		CButtonContainer m_AcceptButton;
+		CButtonContainer m_CloseButton;
+		CButtonContainer m_InitialColorButton;
+		CButtonContainer m_aPresetButtons[24];
+		CButtonContainer m_aPaletteSwatchButtons[qm_picker_palette::MAX_SWATCHES];
+		CButtonContainer m_aPaletteDeleteButtons[qm_picker_palette::MAX_SWATCHES];
+		CButtonContainer m_AddPaletteButton;
+		// 调色板色块双击改名判定：记录上次左键点击的色块与时间。
+		float m_aSwatchClickTime[qm_picker_palette::MAX_SWATCHES] = {0.0f};
+		int m_LastSwatchClickIndex = -1;
 		EEditState m_State = EEditState::NONE;
 	};
 	void ShowPopupColorPicker(float X, float Y, SColorPickerPopupContext *pContext);
@@ -835,12 +1518,150 @@ public:
 	// dropdown menu
 	struct SDropDownState
 	{
+		SDropDownState() = default;
+		SDropDownState(const SDropDownState &) = delete;
+		SDropDownState &operator=(const SDropDownState &) = delete;
+
 		SSelectionPopupContext m_SelectionPopupContext;
+		CQmDropdownState m_DropDownState;
+		std::shared_ptr<CScrollRegion> m_pOwnedScrollRegion;
+		CScrollRegion *m_pScrollRegion = nullptr;
 		CUIElement m_UiElement;
 		CButtonContainer m_ButtonContainer;
 		bool m_Init = false;
 	};
-	int DoDropDown(CUIRect *pRect, int CurSelection, const char **pStrs, int Num, SDropDownState &State);
+	struct SDropDownProperties
+	{
+		SDropDownProperties() :
+			m_FontSize(-1.0f),
+			m_Enabled(true),
+			m_ClosePopupWhenDisabled(true),
+			m_RequireSourceRefresh(true),
+			m_pAnchorViewport(nullptr),
+			m_pPopupViewport(nullptr)
+		{
+		}
+
+		float m_FontSize;
+		uint64_t m_QmFrame = 1;
+	bool m_UseGraphicsScreenAspect = true;
+	bool m_Enabled;
+		bool m_ClosePopupWhenDisabled;
+		bool m_RequireSourceRefresh;
+		// 下拉框的锚点和弹层有不同的裁剪语义：锚点必须仍在所属控件内，
+		// 弹层则允许离开卡片，但不能越过设置页滚动 viewport。未指定时沿用
+		// 当前 clip stack，旧调用方因此保持兼容。
+		const CUIRect *m_pAnchorViewport;
+		const CUIRect *m_pPopupViewport;
+		SQmDropdownVisualStyle m_VisualStyle;
+		bool m_Searchable = false;
+		const void *m_pConfigValue = nullptr;
+		const void *m_pSecondConfigValue = nullptr;
+	};
+	int DoDropDown(CUIRect *pRect, int CurSelection, const char *const *pStrs, int Num, SDropDownState &State, const SDropDownProperties &DropDownProps = {});
+	int DoDropDown(CUIRect *pRect, int CurSelection, const char *const *pStrs, int Num, SDropDownState &State, bool Enabled);
+};
+
+// 测量独立于后台只读绘制，嵌套进入时仍建立零尺寸裁剪。
+class CUiScopedMeasurement
+{
+	CUi *m_pUi;
+
+public:
+	explicit CUiScopedMeasurement(CUi *pUi, bool Enabled = true) : m_pUi(Enabled ? pUi : nullptr)
+	{
+		if(m_pUi != nullptr)
+			m_pUi->BeginRenderOnly();
+	}
+	~CUiScopedMeasurement()
+	{
+		if(m_pUi != nullptr)
+			m_pUi->EndRenderOnly();
+	}
+	CUiScopedMeasurement(const CUiScopedMeasurement &) = delete;
+	CUiScopedMeasurement &operator=(const CUiScopedMeasurement &) = delete;
+};
+
+class CUiScopedBackgroundRender
+{
+	CUi *m_pUi;
+	bool m_ContentDraw;
+
+public:
+	explicit CUiScopedBackgroundRender(CUi *pUi, bool ContentDraw = false) : m_pUi(pUi), m_ContentDraw(ContentDraw) { m_pUi->BeginBackgroundRender(m_ContentDraw); }
+	~CUiScopedBackgroundRender() { m_pUi->EndBackgroundRender(m_ContentDraw); }
+	CUiScopedBackgroundRender(const CUiScopedBackgroundRender &) = delete;
+	CUiScopedBackgroundRender &operator=(const CUiScopedBackgroundRender &) = delete;
+};
+
+class CUiScopedInteractionOwner
+{
+	CUi *m_pUi;
+	const void *m_pPreviousContext = nullptr;
+	const char *m_pPreviousCardId = nullptr;
+
+public:
+	CUiScopedInteractionOwner(CUi *pUi, const void *pContext, const char *pCardId) :
+		m_pUi(pUi != nullptr && !pUi->RenderOnly() ? pUi : nullptr)
+	{
+		if(m_pUi == nullptr)
+			return;
+		m_pPreviousContext = m_pUi->m_pInteractionContext;
+		m_pPreviousCardId = m_pUi->m_pInteractionCardId;
+		m_pUi->m_pInteractionContext = pContext;
+		m_pUi->m_pInteractionCardId = pCardId;
+	}
+	~CUiScopedInteractionOwner()
+	{
+		if(m_pUi == nullptr)
+			return;
+		m_pUi->m_pInteractionContext = m_pPreviousContext;
+		m_pUi->m_pInteractionCardId = m_pPreviousCardId;
+	}
+	CUiScopedInteractionOwner(const CUiScopedInteractionOwner &) = delete;
+	CUiScopedInteractionOwner &operator=(const CUiScopedInteractionOwner &) = delete;
+};
+
+// 父层淡入淡出按层相乘，离开作用域后恢复，避免页面背景设置串入控件颜色。
+class CUiScopedControlAlphaScale
+{
+	CUi *m_pUi;
+	float m_Previous;
+	ITextRender *m_pTextRender;
+	ColorRGBA m_PreviousText;
+	ColorRGBA m_PreviousOutline;
+	ColorRGBA m_PreviousSelection;
+
+public:
+	CUiScopedControlAlphaScale(CUi *pUi, float Alpha) :
+		m_pUi(pUi), m_Previous(pUi != nullptr ? pUi->ControlAlphaScale() : 1.0f), m_pTextRender(pUi != nullptr ? pUi->TextRender() : nullptr)
+	{
+		const float Scale = std::clamp(Alpha, 0.0f, 1.0f);
+		if(m_pUi != nullptr)
+			m_pUi->SetControlAlphaScale(m_Previous * Scale);
+		if(m_pTextRender != nullptr)
+		{
+			m_PreviousText = m_pTextRender->GetTextColor();
+			m_PreviousOutline = m_pTextRender->GetTextOutlineColor();
+			m_PreviousSelection = m_pTextRender->GetTextSelectionColor();
+			m_pTextRender->TextColor(m_PreviousText.WithMultipliedAlpha(Scale));
+			m_pTextRender->TextOutlineColor(m_PreviousOutline.WithMultipliedAlpha(Scale));
+			m_pTextRender->TextSelectionColor(m_PreviousSelection.WithMultipliedAlpha(Scale));
+		}
+	}
+	~CUiScopedControlAlphaScale()
+	{
+		if(m_pUi != nullptr)
+			m_pUi->SetControlAlphaScale(m_Previous);
+		if(m_pTextRender != nullptr)
+		{
+			m_pTextRender->TextColor(m_PreviousText);
+			m_pTextRender->TextOutlineColor(m_PreviousOutline);
+			m_pTextRender->TextSelectionColor(m_PreviousSelection);
+		}
+	}
+	CUiScopedControlAlphaScale(const CUiScopedControlAlphaScale &) = delete;
+	CUiScopedControlAlphaScale &operator=(const CUiScopedControlAlphaScale &) = delete;
 };
 
 #endif

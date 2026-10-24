@@ -161,6 +161,8 @@ static inline bool RepackMsg(const CMsgPacker *pMsg, CPacker &Packer, bool Sixup
 				MsgId = protocol7::NETMSG_RCON_AUTH;
 			else if(MsgId == NETMSG_PING)
 				MsgId = protocol7::NETMSG_PING;
+			else if(MsgId == NETMSG_PING_REPLY)
+				MsgId = protocol7::NETMSG_PING_REPLY;
 			else
 			{
 				log_error("net", "0.7 DROP send sys %d", MsgId);
@@ -226,7 +228,7 @@ int CClient::SendMsg(int Conn, CMsgPacker *pMsg, int Flags)
 
 	if(!(Flags & MSGFLAG_NOSEND))
 	{
-		m_aNetClient[Conn].Send(&Packet);
+		NetClient(Conn).Send(&Packet);
 	}
 
 	return 0;
@@ -274,6 +276,52 @@ void CClient::SendEnterGame(int Conn)
 {
 	CMsgPacker Msg(NETMSG_ENTERGAME, true);
 	SendMsg(Conn, &Msg, MSGFLAG_VITAL | MSGFLAG_FLUSH);
+}
+
+void CClient::SendExtraDummyInfo(int Conn)
+{
+	char aName[64];
+	str_copy(aName, DummyConnectionName(m_aNetClientSlots[Conn]));
+	if(IsSixup())
+	{
+		protocol7::CNetMsg_Cl_StartInfo Msg;
+		Msg.m_pName = aName;
+		Msg.m_pClan = g_Config.m_ClDummyClan;
+		Msg.m_Country = g_Config.m_ClDummyCountry;
+		Msg.m_apSkinPartNames[protocol7::SKINPART_BODY] = g_Config.m_ClDummy7SkinBody;
+		Msg.m_apSkinPartNames[protocol7::SKINPART_MARKING] = g_Config.m_ClDummy7SkinMarking;
+		Msg.m_apSkinPartNames[protocol7::SKINPART_DECORATION] = g_Config.m_ClDummy7SkinDecoration;
+		Msg.m_apSkinPartNames[protocol7::SKINPART_HANDS] = g_Config.m_ClDummy7SkinHands;
+		Msg.m_apSkinPartNames[protocol7::SKINPART_FEET] = g_Config.m_ClDummy7SkinFeet;
+		Msg.m_apSkinPartNames[protocol7::SKINPART_EYES] = g_Config.m_ClDummy7SkinEyes;
+		Msg.m_aUseCustomColors[protocol7::SKINPART_BODY] = g_Config.m_ClDummy7UseCustomColorBody;
+		Msg.m_aUseCustomColors[protocol7::SKINPART_MARKING] = g_Config.m_ClDummy7UseCustomColorMarking;
+		Msg.m_aUseCustomColors[protocol7::SKINPART_DECORATION] = g_Config.m_ClDummy7UseCustomColorDecoration;
+		Msg.m_aUseCustomColors[protocol7::SKINPART_HANDS] = g_Config.m_ClDummy7UseCustomColorHands;
+		Msg.m_aUseCustomColors[protocol7::SKINPART_FEET] = g_Config.m_ClDummy7UseCustomColorFeet;
+		Msg.m_aUseCustomColors[protocol7::SKINPART_EYES] = g_Config.m_ClDummy7UseCustomColorEyes;
+		Msg.m_aSkinPartColors[protocol7::SKINPART_BODY] = g_Config.m_ClDummy7ColorBody;
+		Msg.m_aSkinPartColors[protocol7::SKINPART_MARKING] = g_Config.m_ClDummy7ColorMarking;
+		Msg.m_aSkinPartColors[protocol7::SKINPART_DECORATION] = g_Config.m_ClDummy7ColorDecoration;
+		Msg.m_aSkinPartColors[protocol7::SKINPART_HANDS] = g_Config.m_ClDummy7ColorHands;
+		Msg.m_aSkinPartColors[protocol7::SKINPART_FEET] = g_Config.m_ClDummy7ColorFeet;
+		Msg.m_aSkinPartColors[protocol7::SKINPART_EYES] = g_Config.m_ClDummy7ColorEyes;
+		CMsgPacker Packer(&Msg, false, true);
+		if(!Msg.Pack(&Packer))
+			SendMsg(Conn, &Packer, MSGFLAG_VITAL | MSGFLAG_FLUSH);
+		return;
+	}
+	CNetMsg_Cl_StartInfo Msg;
+	Msg.m_pName = aName;
+	Msg.m_pClan = g_Config.m_ClDummyClan;
+	Msg.m_Country = g_Config.m_ClDummyCountry;
+	Msg.m_pSkin = g_Config.m_ClDummySkin;
+	Msg.m_UseCustomColor = g_Config.m_ClDummyUseCustomColor;
+	Msg.m_ColorBody = g_Config.m_ClDummyColorBody;
+	Msg.m_ColorFeet = g_Config.m_ClDummyColorFeet;
+	CMsgPacker Packer(&Msg);
+	Msg.Pack(&Packer);
+	SendMsg(Conn, &Packer, MSGFLAG_VITAL | MSGFLAG_FLUSH);
 }
 
 void CClient::SendReady(int Conn)
@@ -359,7 +407,7 @@ float CClient::GotMaplistPercentage() const
 
 bool CClient::ConnectionProblems() const
 {
-	return m_aNetClient[g_Config.m_ClDummy].GotProblems(MaxLatencyTicks() * time_freq() / GameTickSpeed());
+	return NetClient(g_Config.m_ClDummy).GotProblems(MaxLatencyTicks() * time_freq() / GameTickSpeed());
 }
 
 void CClient::SendInput()
@@ -379,6 +427,18 @@ void CClient::SendInput()
 		}
 		int i = g_Config.m_ClDummy ^ Dummy;
 		int Size = GameClient()->OnSnapInput(m_aInputs[i][m_aCurrentInput[i]].m_aData, Dummy, Force);
+		if(i == CONN_DUMMY && Size == sizeof(CNetObj_PlayerInput))
+		{
+			mem_copy(&m_aDummySessions[m_aNetClientSlots[i] - 1].m_Input, m_aInputs[i][m_aCurrentInput[i]].m_aData, Size);
+		}
+		if(Dummy == 0 && Size == sizeof(CNetObj_PlayerInput))
+		{
+			for(int Conn = CONN_DUMMY2; Conn <= CONN_DUMMY3; Conn++)
+			{
+				auto &Session = m_aDummySessions[m_aNetClientSlots[Conn] - 1];
+				Session.CopyInput(g_Config.m_ClDummyCopyMoves ? reinterpret_cast<const CNetObj_PlayerInput *>(m_aInputs[i][m_aCurrentInput[i]].m_aData) : nullptr);
+			}
+		}
 
 		if(Size)
 		{
@@ -553,10 +613,14 @@ void CClient::OnPostConnect(int Conn)
 		return;
 
 	char aBufMsg[256];
+	char aTimeoutCode[40];
+	str_copy(aTimeoutCode, m_aTimeoutCodes[Conn]);
+	if(Conn == CONN_DUMMY && m_aNetClientSlots[Conn] > 1)
+		str_format(aTimeoutCode, sizeof(aTimeoutCode), "%s-%d", m_aTimeoutCodes[Conn], m_aNetClientSlots[Conn]);
 	if(!g_Config.m_ClRunOnJoin[0] && !g_Config.m_ClDummyDefaultEyes && !g_Config.m_ClPlayerDefaultEyes)
-		str_format(aBufMsg, sizeof(aBufMsg), "/timeout %s", m_aTimeoutCodes[Conn]);
+		str_format(aBufMsg, sizeof(aBufMsg), "/timeout %s", aTimeoutCode);
 	else
-		str_format(aBufMsg, sizeof(aBufMsg), "/mc;timeout %s", m_aTimeoutCodes[Conn]);
+		str_format(aBufMsg, sizeof(aBufMsg), "/mc;timeout %s", aTimeoutCode);
 
 	if(g_Config.m_ClDummyDefaultEyes || g_Config.m_ClPlayerDefaultEyes)
 	{
@@ -671,7 +735,7 @@ void CClient::Connect(const char *pAddress, const char *pPassword)
 		if(UrlParseResult > 0)
 			str_copy(aHost, aBuffer);
 
-		if(net_host_lookup(aHost, &NextAddr, m_aNetClient[CONN_MAIN].NetType()) != 0)
+		if(net_host_lookup(aHost, &NextAddr, NetClient(CONN_MAIN).NetType()) != 0)
 		{
 			log_error("client", "could not find address of %s", aHost);
 			continue;
@@ -745,14 +809,14 @@ void CClient::Connect(const char *pAddress, const char *pPassword)
 	m_Sixup = OnlySixup;
 	if(m_Sixup)
 	{
-		m_aNetClient[CONN_MAIN].Connect7(aConnectAddrs, NumConnectAddrs);
+		NetClient(CONN_MAIN).Connect7(aConnectAddrs, NumConnectAddrs);
 	}
 	else
 	{
-		m_aNetClient[CONN_MAIN].Connect(aConnectAddrs, NumConnectAddrs);
+		NetClient(CONN_MAIN).Connect(aConnectAddrs, NumConnectAddrs);
 	}
 
-	m_aNetClient[CONN_MAIN].RefreshStun();
+	NetClient(CONN_MAIN).RefreshStun();
 	SetState(IClient::STATE_CONNECTING);
 
 	m_aInputtimeMarginGraphs[CONN_MAIN].Init(-150.0f, 150.0f);
@@ -793,7 +857,7 @@ void CClient::DisconnectWithReason(const char *pReason)
 	m_ExpectedMaplistEntries = -1;
 	m_vMaplistEntries.clear();
 	GameClient()->ForceUpdateConsoleRemoteCompletionSuggestions();
-	m_aNetClient[CONN_MAIN].Disconnect(pReason);
+	NetClient(CONN_MAIN).Disconnect(pReason);
 	SetState(IClient::STATE_OFFLINE);
 	GameClient()->Map()->Unload();
 	m_CurrentServerPingInfoType = -1;
@@ -834,7 +898,7 @@ bool CClient::DummyConnected() const
 
 bool CClient::DummyConnecting() const
 {
-	return m_DummyConnecting;
+	return m_DummyConnecting || std::any_of(std::begin(m_aAdditionalDummyConnecting), std::end(m_aAdditionalDummyConnecting), [](bool Connecting) { return Connecting; });
 }
 
 bool CClient::DummyConnectingDelayed() const
@@ -842,9 +906,203 @@ bool CClient::DummyConnectingDelayed() const
 	return !DummyConnected() && !DummyConnecting() && m_LastDummyConnectTime > 0.0f && m_LastDummyConnectTime + 5.0f > GlobalTime();
 }
 
+int CClient::DummyConnectedCount() const
+{
+	return (m_DummyConnected ? 1 : 0) + static_cast<int>(std::count(std::begin(m_aAdditionalDummyConnected), std::end(m_aAdditionalDummyConnected), true));
+}
+
+bool CClient::DummyIsConnected(int Number) const
+{
+	if(Number == 0)
+		return State() == STATE_ONLINE;
+	for(int Conn = CONN_DUMMY; Conn <= CONN_DUMMY3; Conn++)
+	{
+		if(m_aNetClientSlots[Conn] == Number)
+			return Conn == CONN_DUMMY ? m_DummyConnected : m_aAdditionalDummyConnected[Conn - CONN_DUMMY2];
+	}
+	return false;
+}
+
+void CClient::DummySelect(int Number)
+{
+	if(Number >= 0 && Number <= MAX_DUMMY_CONNECTIONS && DummyIsConnected(Number))
+		m_PendingDummySelection = Number;
+}
+
+void CClient::DummyDisconnectNumber(int Number)
+{
+	if(Number > 0 && Number <= MAX_DUMMY_CONNECTIONS)
+		m_PendingDummyDisconnect = Number;
+}
+
+void CClient::DisconnectDummyConnection(int Conn, const char *pReason)
+{
+	NetClient(Conn).Disconnect(pReason);
+	m_aDummySessions[m_aNetClientSlots[Conn] - 1].Reset();
+	if(Conn != CONN_DUMMY)
+	{
+		const int Extra = Conn - CONN_DUMMY2;
+		m_aAdditionalDummyConnected[Extra] = m_aAdditionalDummyConnecting[Extra] = m_aAdditionalDummySendConnInfo[Extra] = false;
+		return;
+	}
+	const bool TakeControl = g_Config.m_ClDummy != 0 || m_ActivateSelectedDummy;
+	m_DummyConnected = m_DummyConnecting = m_DummySendConnInfo = false;
+	for(int Backup = CONN_DUMMY2; Backup <= CONN_DUMMY3; Backup++)
+	{
+		if(m_aAdditionalDummyConnected[Backup - CONN_DUMMY2] && NetClient(Backup).State() == NETSTATE_ONLINE)
+		{
+			SelectDummyConnection(Backup, TakeControl);
+			return;
+		}
+	}
+	DummyDisconnect(pReason);
+}
+
+void CClient::SelectDummyConnection(int Conn, bool TakeControl)
+{
+	if(Conn == CONN_DUMMY)
+	{
+		if(m_aReceivedSnapshots[1] >= 2)
+			g_Config.m_ClDummy = TakeControl ? 1 : 0;
+		else
+			m_ActivateSelectedDummy = TakeControl;
+		return;
+	}
+	// Release the old character before parking it. Fire/weapon counters and
+	// aim stay with their original connection, so selecting another dummy
+	// cannot create phantom clicks or leave movement/hook held down.
+	auto &OldSession = m_aDummySessions[m_aNetClientSlots[CONN_DUMMY] - 1];
+	OldSession.ReleaseInput();
+	OldSession.CopyInput(nullptr);
+	SendDummyInput(CONN_DUMMY);
+	g_Config.m_ClDummy = 0;
+	if(m_LastDummy)
+	{
+		GameClient()->InvalidateSnapshot();
+		GameClient()->OnDummySwap();
+		m_LastDummy = false;
+	}
+	std::swap(m_aNetClientSlots[CONN_DUMMY], m_aNetClientSlots[Conn]);
+	const int Extra = Conn - CONN_DUMMY2;
+	std::swap(m_DummyConnected, m_aAdditionalDummyConnected[Extra]);
+	std::swap(m_DummyConnecting, m_aAdditionalDummyConnecting[Extra]);
+	std::swap(m_DummySendConnInfo, m_aAdditionalDummySendConnInfo[Extra]);
+	auto &Session = m_aDummySessions[m_aNetClientSlots[CONN_DUMMY] - 1];
+	Session.ReleaseInput();
+	Session.CopyInput(nullptr);
+	GameClient()->OnDummyChange(reinterpret_cast<const int *>(&Session.m_Input));
+	m_TranslationContext.m_aLocalClientId[1] = Session.m_LocalId7;
+	// Only slot 1 is invalidated. Keep the main prediction clock and world.
+	m_aapSnapshots[1][SNAP_PREV] = m_aapSnapshots[1][SNAP_CURRENT] = nullptr;
+	m_aSnapshotStorage[1].PurgeAll();
+	m_aReceivedSnapshots[1] = 0;
+	m_aSnapshotParts[1] = 0;
+	m_aSnapshotIncomingDataSize[1] = m_aCurrentRecvTick[1] = 0;
+	m_aAckGameTick[1] = -1;
+	m_aRconAuthed[1] = 0;
+	m_aCurrentInput[1] = 0;
+	for(auto &Input : m_aInputs[1])
+		Input.m_Tick = -1;
+	m_aPrevGameTick[1] = m_aCurGameTick[1] = m_aPredTick[1] = 0;
+	m_aDidPostConnect[1] = Session.m_DidPostConnect;
+	m_ActivateSelectedDummy = TakeControl;
+	// Restore tuning received while this connection was in the background.
+	if(!Session.m_vTuning.empty())
+	{
+		CNetChunk Packet = {};
+		Packet.m_pData = Session.m_vTuning.data();
+		Packet.m_DataSize = Session.m_vTuning.size();
+		Packet.m_Flags = NET_CHUNKFLAG_VITAL;
+		ProcessServerPacket(&Packet, CONN_DUMMY, true);
+	}
+	SendDummyInput(CONN_DUMMY, true);
+}
+
+void CClient::SendDummyInput(int Conn, bool ResetAck)
+{
+	auto &Session = m_aDummySessions[m_aNetClientSlots[Conn] - 1];
+	const int Tick = std::max(m_aPredTick[g_Config.m_ClDummy], Session.LastSnapshotTick() + 1);
+	if(Tick <= 0)
+		return;
+	CMsgPacker Msg(NETMSG_INPUT, true);
+	Msg.AddInt(ResetAck ? -1 : Session.m_AckTick);
+	Msg.AddInt(Tick);
+	Msg.AddInt(sizeof(Session.m_Input));
+	const int *pInput = reinterpret_cast<const int *>(&Session.m_Input);
+	for(size_t k = 0; k < sizeof(Session.m_Input) / sizeof(int); k++)
+	{
+		const int Value = pInput[k];
+		Msg.AddInt(IsSixup() && k == offsetof(CNetObj_PlayerInput, m_PlayerFlags) / sizeof(int) ? PlayerFlags_SixToSeven(Value) : Value);
+	}
+	SendMsg(Conn, &Msg, MSGFLAG_FLUSH);
+	Session.m_LastInputTime = time_get();
+}
+
+void CClient::ProcessDummyPacket(CNetChunk *pPacket, int Conn)
+{
+	auto &Session = m_aDummySessions[m_aNetClientSlots[Conn] - 1];
+	CUnpacker Unpacker;
+	Unpacker.Reset(pPacket->m_pData, pPacket->m_DataSize);
+	CMsgPacker Answer(NETMSG_EX, true);
+	int Msg;
+	bool System;
+	CUuid Uuid;
+	const int Result = UnpackMessageId(&Msg, &System, &Uuid, &Unpacker, &Answer);
+	if(Result == UNPACKMESSAGE_ERROR)
+		return;
+	if(Result == UNPACKMESSAGE_ANSWER && Conn != CONN_DUMMY)
+		SendMsg(Conn, &Answer, MSGFLAG_VITAL);
+	if(!System)
+	{
+		if(!(pPacket->m_Flags & NET_CHUNKFLAG_VITAL))
+			return;
+		if(Msg == NETMSGTYPE_SV_TUNEPARAMS)
+		{
+			const auto *pBytes = static_cast<const unsigned char *>(pPacket->m_pData);
+			Session.m_vTuning.assign(pBytes, pBytes + pPacket->m_DataSize);
+		}
+		if(IsSixup() && Msg == protocol7::NETMSGTYPE_SV_CLIENTINFO)
+		{
+			const int Id = Unpacker.GetInt();
+			const int Local = Unpacker.GetInt();
+			if(!Unpacker.Error() && Local == 1 && Id >= 0 && Id < MAX_CLIENTS)
+				Session.m_LocalId7 = Id;
+		}
+		if(Conn != CONN_DUMMY && Msg == (IsSixup() ? static_cast<int>(protocol7::NETMSGTYPE_SV_READYTOENTER) : static_cast<int>(NETMSGTYPE_SV_READYTOENTER)))
+			SendEnterGame(Conn);
+		return;
+	}
+	// The 0.7 snapshot payload is identical; only system message IDs differ.
+	if(IsSixup() && Msg >= protocol7::NETMSG_CON_READY && Msg <= protocol7::NETMSG_INPUTTIMING)
+		Msg--;
+	if(Msg == NETMSG_SNAP || Msg == NETMSG_SNAPSINGLE || Msg == NETMSG_SNAPEMPTY)
+	{
+		if(State() == STATE_ONLINE && GameClient()->Map()->IsLoaded())
+			Session.ReceiveSnapshot(Msg, Unpacker, *SnapshotDelta(), time_get());
+	}
+	else if(Conn != CONN_DUMMY && Msg == NETMSG_CON_READY && (pPacket->m_Flags & NET_CHUNKFLAG_VITAL))
+	{
+		m_aAdditionalDummyConnected[Conn - CONN_DUMMY2] = true;
+		m_aAdditionalDummyConnecting[Conn - CONN_DUMMY2] = false;
+		SendDummyInput(Conn);
+	}
+	else if(Conn != CONN_DUMMY && (Msg == NETMSG_PING || Msg == NETMSG_PINGEX))
+	{
+		CMsgPacker Pong(Msg == NETMSG_PING ? NETMSG_PING_REPLY : NETMSG_PONGEX, true);
+		if(Msg == NETMSG_PINGEX)
+		{
+			const void *pId = Unpacker.GetRaw(sizeof(CUuid));
+			if(Unpacker.Error())
+				return;
+			Pong.AddRaw(pId, sizeof(CUuid));
+		}
+		SendMsg(Conn, &Pong, MSGFLAG_FLUSH | ((pPacket->m_Flags & NET_CHUNKFLAG_VITAL) ? MSGFLAG_VITAL : 0));
+	}
+}
+
 void CClient::DummyConnect()
 {
-	if(m_aNetClient[CONN_MAIN].State() != NETSTATE_ONLINE)
+	if(NetClient(CONN_MAIN).State() != NETSTATE_ONLINE)
 	{
 		log_info("client", "Not online.");
 		return;
@@ -857,43 +1115,68 @@ void CClient::DummyConnect()
 	}
 	if(DummyConnecting())
 	{
-		log_info("client", "Dummy is already connecting.");
+		log_info("client", "A dummy is already connecting.");
 		return;
 	}
-	if(DummyConnected())
+	if(!m_DummyConnected)
 	{
-		// causes log spam with connect+swap binds
-		// https://github.com/ddnet/ddnet/issues/9426
-		// log_info("client", "Dummy is already connected.");
+		m_aDummySessions[m_aNetClientSlots[CONN_DUMMY] - 1].Reset();
+		m_LastDummyConnectTime = GlobalTime();
+		m_aRconAuthed[1] = 0;
+		m_DummySendConnInfo = true;
+
+		g_Config.m_ClDummyCopyMoves = 0;
+		g_Config.m_ClDummyHammer = 0;
+
+		m_DummyConnecting = true;
+		if(IsSixup())
+			NetClient(CONN_DUMMY).Connect7(NetClient(CONN_MAIN).ServerAddress(), 1);
+		else
+			NetClient(CONN_DUMMY).Connect(NetClient(CONN_MAIN).ServerAddress(), 1);
+
+		m_aInputtimeMarginGraphs[CONN_DUMMY].Init(-150.0f, 150.0f);
+		m_aGametimeMarginGraphs[CONN_DUMMY].Init(-150.0f, 150.0f);
 		return;
 	}
-	if(DummyConnectingDelayed())
+
+	const int DummyCount = DummyConnectedCount();
+	if(DummyCount >= MAX_DUMMY_CONNECTIONS)
 	{
-		log_info("client", "Wait before connecting dummy again.");
+		log_info("client", "Maximum number of dummy connections reached.");
 		return;
 	}
 
-	m_LastDummyConnectTime = GlobalTime();
-	m_aRconAuthed[1] = 0;
-	m_DummySendConnInfo = true;
-
-	g_Config.m_ClDummyCopyMoves = 0;
-	g_Config.m_ClDummyHammer = 0;
-
-	m_DummyConnecting = true;
-	// connect to the server
+	const int ExtraIndex = m_aAdditionalDummyConnected[0] || m_aAdditionalDummyConnecting[0] ? 1 : 0;
+	const int Conn = ExtraIndex == 0 ? CONN_DUMMY2 : CONN_DUMMY3;
+	m_aDummySessions[m_aNetClientSlots[Conn] - 1].Reset();
+	m_aAdditionalDummyConnecting[ExtraIndex] = true;
+	m_aAdditionalDummySendConnInfo[ExtraIndex] = true;
 	if(IsSixup())
-		m_aNetClient[CONN_DUMMY].Connect7(m_aNetClient[CONN_MAIN].ServerAddress(), 1);
+		NetClient(Conn).Connect7(NetClient(CONN_MAIN).ServerAddress(), 1);
 	else
-		m_aNetClient[CONN_DUMMY].Connect(m_aNetClient[CONN_MAIN].ServerAddress(), 1);
-
-	m_aInputtimeMarginGraphs[CONN_DUMMY].Init(-150.0f, 150.0f);
-	m_aGametimeMarginGraphs[CONN_DUMMY].Init(-150.0f, 150.0f);
+		NetClient(Conn).Connect(NetClient(CONN_MAIN).ServerAddress(), 1);
 }
 
 void CClient::DummyDisconnect(const char *pReason)
 {
-	m_aNetClient[CONN_DUMMY].Disconnect(pReason);
+	m_PendingDummySelection = -1;
+	m_PendingDummyDisconnect = -1;
+	m_ActivateSelectedDummy = false;
+	m_RestoreDummyCount = 0;
+	m_RestoreDummySelected = 0;
+	for(int ExtraIndex = 0; ExtraIndex < MAX_DUMMY_CONNECTIONS - 1; ExtraIndex++)
+	{
+		const int Conn = ExtraIndex == 0 ? CONN_DUMMY2 : CONN_DUMMY3;
+		NetClient(Conn).Disconnect(pReason);
+		m_aAdditionalDummyConnected[ExtraIndex] = false;
+		m_aAdditionalDummyConnecting[ExtraIndex] = false;
+		m_aAdditionalDummySendConnInfo[ExtraIndex] = false;
+	}
+	NetClient(CONN_DUMMY).Disconnect(pReason);
+	for(auto &Session : m_aDummySessions)
+		Session.Reset();
+	for(int Conn = 0; Conn < NUM_CONNS; Conn++)
+		m_aNetClientSlots[Conn] = Conn;
 	g_Config.m_ClDummy = 0;
 
 	m_aRconAuthed[1] = 0;
@@ -1214,30 +1497,24 @@ const char *CClient::PlayerName() const
 
 const char *CClient::DummyName()
 {
-	if(g_Config.m_ClDummyName[0])
-	{
+	return DummyConnectionName(m_aNetClientSlots[CONN_DUMMY]);
+}
+
+const char *CClient::DummyConnectionName(int Number)
+{
+	const char *pBase = g_Config.m_ClDummyName[0] ? g_Config.m_ClDummyName : PlayerName();
+	if(Number == 1 && g_Config.m_ClDummyName[0])
 		return g_Config.m_ClDummyName;
-	}
-	const char *pBase = nullptr;
-	if(g_Config.m_PlayerName[0])
-	{
-		pBase = g_Config.m_PlayerName;
-	}
-	else if(g_Config.m_SteamName[0])
-	{
-		pBase = g_Config.m_SteamName;
-	}
-	if(pBase)
-	{
+	if(Number == 1)
 		str_format(m_aAutomaticDummyName, sizeof(m_aAutomaticDummyName), "[D] %s", pBase);
-		return m_aAutomaticDummyName;
-	}
-	return "brainless tee";
+	else
+		str_format(m_aAutomaticDummyName, sizeof(m_aAutomaticDummyName), "[D%d] %s", Number, pBase);
+	return m_aAutomaticDummyName;
 }
 
 const char *CClient::ErrorString() const
 {
-	return m_aNetClient[CONN_MAIN].ErrorString();
+	return NetClient(CONN_MAIN).ErrorString();
 }
 
 void CClient::Render()
@@ -1584,7 +1861,7 @@ void CClient::ProcessServerInfo(int RawType, NETADDR *pFrom, const void *pData, 
 		//
 		// SERVERINFO_EXTENDED_MORE doesn't carry any server
 		// information, so just skip it.
-		if(m_aNetClient[CONN_MAIN].State() == NETSTATE_ONLINE &&
+		if(NetClient(CONN_MAIN).State() == NETSTATE_ONLINE &&
 			ServerAddress() == *pFrom &&
 			RawType != SERVERINFO_EXTENDED_MORE)
 		{
@@ -1774,7 +2051,11 @@ void CClient::ProcessServerPacket(CNetChunk *pPacket, int Conn, bool Dummy)
 
 			if(m_DummyConnected && !m_DummyReconnectOnReload)
 			{
+				const int Count = DummyConnectedCount();
+				const int Selected = DummySelected();
 				DummyDisconnect(nullptr);
+				m_RestoreDummyCount = Count;
+				m_RestoreDummySelected = Selected;
 			}
 
 			ResetMapDownload(true);
@@ -1911,16 +2192,11 @@ void CClient::ProcessServerPacket(CNetChunk *pPacket, int Conn, bool Dummy)
 		}
 		else if(Conn == CONN_MAIN && (pPacket->m_Flags & NET_CHUNKFLAG_VITAL) != 0 && Msg == NETMSG_MAP_RELOAD)
 		{
-			if(m_DummyConnected)
-			{
-				m_DummyReconnectOnReload = true;
-				m_DummyDeactivateOnReconnect = g_Config.m_ClDummy == 0;
-				g_Config.m_ClDummy = 0;
-			}
-			else
-			{
-				m_DummyDeactivateOnReconnect = false;
-			}
+			const int Count = DummyConnectedCount();
+			const int Selected = DummySelected();
+			DummyDisconnect(nullptr);
+			m_RestoreDummyCount = Count;
+			m_RestoreDummySelected = Selected;
 		}
 		else if(Conn == CONN_MAIN && (pPacket->m_Flags & NET_CHUNKFLAG_VITAL) != 0 && Msg == NETMSG_CON_READY)
 		{
@@ -1942,14 +2218,23 @@ void CClient::ProcessServerPacket(CNetChunk *pPacket, int Conn, bool Dummy)
 			}
 #endif
 		}
-		else if(Conn == CONN_DUMMY && Msg == NETMSG_CON_READY)
+		else if(Conn >= CONN_DUMMY && Conn <= CONN_DUMMY3 && Msg == NETMSG_CON_READY)
 		{
-			m_DummyConnected = true;
-			m_DummyConnecting = false;
-			g_Config.m_ClDummy = 1;
-			Rcon("crashmeplx");
-			if(m_aRconAuthed[0] && !m_aRconAuthed[1])
-				RconAuth(m_aRconUsername, m_aRconPassword);
+			if(Conn == CONN_DUMMY)
+			{
+				m_DummyConnected = true;
+				m_DummyConnecting = false;
+				g_Config.m_ClDummy = 1;
+				Rcon("crashmeplx");
+				if(m_aRconAuthed[0] && !m_aRconAuthed[1])
+					RconAuth(m_aRconUsername, m_aRconPassword);
+			}
+			else
+			{
+				const int ExtraIndex = Conn == CONN_DUMMY2 ? 0 : 1;
+				m_aAdditionalDummyConnected[ExtraIndex] = true;
+				m_aAdditionalDummyConnecting[ExtraIndex] = false;
+			}
 		}
 		else if(Msg == NETMSG_PING)
 		{
@@ -2421,6 +2706,8 @@ void CClient::ProcessServerPacket(CNetChunk *pPacket, int Conn, bool Dummy)
 					{
 						OnPostConnect(Conn);
 						m_aDidPostConnect[Conn] = true;
+						if(Conn == CONN_DUMMY)
+							m_aDummySessions[m_aNetClientSlots[Conn] - 1].m_DidPostConnect = true;
 					}
 
 					// ack snapshot
@@ -2483,6 +2770,8 @@ void CClient::ProcessServerPacket(CNetChunk *pPacket, int Conn, bool Dummy)
 	// the client handles only vital messages https://github.com/ddnet/ddnet/issues/11178
 	else if((pPacket->m_Flags & NET_CHUNKFLAG_VITAL) != 0 || Msg == NETMSGTYPE_SV_PREINPUT)
 	{
+		if(Conn == CONN_DUMMY2 || Conn == CONN_DUMMY3)
+			return;
 		// game message
 		if(!Dummy)
 		{
@@ -2697,7 +2986,7 @@ void CClient::LoadDDNetInfo()
 		NETADDR Addr;
 		if(!net_addr_from_str(&Addr, StunServersIpv6[0]))
 		{
-			m_aNetClient[CONN_MAIN].FeedStunServer(Addr);
+			NetClient(CONN_MAIN).FeedStunServer(Addr);
 		}
 	}
 	const json_value &StunServersIpv4 = DDNetInfo["stun-servers-ipv4"];
@@ -2706,7 +2995,7 @@ void CClient::LoadDDNetInfo()
 		NETADDR Addr;
 		if(!net_addr_from_str(&Addr, StunServersIpv4[0]))
 		{
-			m_aNetClient[CONN_MAIN].FeedStunServer(Addr);
+			NetClient(CONN_MAIN).FeedStunServer(Addr);
 		}
 	}
 	const json_value &ConnectingIp = DDNetInfo["connecting-ip"];
@@ -2729,7 +3018,7 @@ int CClient::ConnectNetTypes() const
 {
 	const NETADDR *pConnectAddrs;
 	int NumConnectAddrs;
-	m_aNetClient[CONN_MAIN].ConnectAddresses(&pConnectAddrs, &NumConnectAddrs);
+	NetClient(CONN_MAIN).ConnectAddresses(&pConnectAddrs, &NumConnectAddrs);
 	int NetType = 0;
 	for(int i = 0; i < NumConnectAddrs; i++)
 	{
@@ -2743,6 +3032,40 @@ void CClient::PumpNetwork()
 #if defined(CONF_PLATFORM_IOS)
 	RecreateBrokenSockets();
 #endif
+	if(m_PendingDummyDisconnect >= 0)
+	{
+		const int Number = m_PendingDummyDisconnect;
+		m_PendingDummyDisconnect = -1;
+		for(int Conn = CONN_DUMMY; Conn <= CONN_DUMMY3; Conn++)
+		{
+			if(m_aNetClientSlots[Conn] == Number)
+			{
+				DisconnectDummyConnection(Conn, nullptr);
+				break;
+			}
+		}
+	}
+	if(m_PendingDummySelection >= 0)
+	{
+		const int Number = m_PendingDummySelection;
+		m_PendingDummySelection = -1;
+		if(Number == 0)
+		{
+			g_Config.m_ClDummy = 0;
+			m_ActivateSelectedDummy = false;
+		}
+		else if(DummyIsConnected(Number))
+		{
+			for(int Conn = CONN_DUMMY; Conn <= CONN_DUMMY3; Conn++)
+			{
+				if(m_aNetClientSlots[Conn] == Number)
+				{
+					SelectDummyConnection(Conn, true);
+					break;
+				}
+			}
+		}
+	}
 
 	for(auto &NetClient : m_aNetClient)
 	{
@@ -2754,31 +3077,51 @@ void CClient::PumpNetwork()
 		// check for errors of main and dummy
 		if(State() != IClient::STATE_OFFLINE && State() < IClient::STATE_QUITTING)
 		{
-			if(m_aNetClient[CONN_MAIN].State() == NETSTATE_OFFLINE)
+			if(NetClient(CONN_MAIN).State() == NETSTATE_OFFLINE)
 			{
 				// This will also disconnect the dummy, so the branch below is an `else if`
 				Disconnect();
 				char aBuf[256];
-				str_format(aBuf, sizeof(aBuf), "offline error='%s'", m_aNetClient[CONN_MAIN].ErrorString());
+				str_format(aBuf, sizeof(aBuf), "offline error='%s'", NetClient(CONN_MAIN).ErrorString());
 				m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "client", aBuf, CLIENT_NETWORK_PRINT_ERROR_COLOR);
 			}
-			else if((DummyConnecting() || DummyConnected()) && m_aNetClient[CONN_DUMMY].State() == NETSTATE_OFFLINE)
+			else if((m_DummyConnecting || m_DummyConnected) && NetClient(CONN_DUMMY).State() == NETSTATE_OFFLINE)
 			{
-				const bool WasConnecting = DummyConnecting();
-				DummyDisconnect(nullptr);
+				const bool WasConnecting = m_DummyConnecting;
+				char aReason[256];
+				str_copy(aReason, NetClient(CONN_DUMMY).ErrorString());
 				char aBuf[256];
-				str_format(aBuf, sizeof(aBuf), "offline dummy error='%s'", m_aNetClient[CONN_DUMMY].ErrorString());
+				str_format(aBuf, sizeof(aBuf), "Dummy %d disconnected: %s", m_aNetClientSlots[CONN_DUMMY], aReason);
 				m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "client", aBuf, CLIENT_NETWORK_PRINT_ERROR_COLOR);
+				DisconnectDummyConnection(CONN_DUMMY, nullptr);
 				if(WasConnecting)
 				{
-					str_format(aBuf, sizeof(aBuf), "%s: %s", Localize("Could not connect dummy"), m_aNetClient[CONN_DUMMY].ErrorString());
+					str_format(aBuf, sizeof(aBuf), "%s: %s", Localize("Could not connect dummy"), aReason);
 					GameClient()->Echo(aBuf);
+				}
+			}
+			else
+			{
+				for(int ExtraIndex = 0; ExtraIndex < MAX_DUMMY_CONNECTIONS - 1; ExtraIndex++)
+				{
+					const int Conn = ExtraIndex == 0 ? CONN_DUMMY2 : CONN_DUMMY3;
+					if((m_aAdditionalDummyConnecting[ExtraIndex] || m_aAdditionalDummyConnected[ExtraIndex]) && NetClient(Conn).State() == NETSTATE_OFFLINE)
+					{
+						char aBuf[256];
+						str_format(aBuf, sizeof(aBuf), "Dummy %d disconnected: %s", m_aNetClientSlots[Conn], NetClient(Conn).ErrorString());
+						GameClient()->Echo(aBuf);
+						m_RestoreDummyCount = 0;
+						m_aDummySessions[m_aNetClientSlots[Conn] - 1].Reset();
+						m_aAdditionalDummyConnecting[ExtraIndex] = false;
+						m_aAdditionalDummyConnected[ExtraIndex] = false;
+						m_aAdditionalDummySendConnInfo[ExtraIndex] = false;
+					}
 				}
 			}
 		}
 
 		// check if main was connected
-		if(State() == IClient::STATE_CONNECTING && m_aNetClient[CONN_MAIN].State() == NETSTATE_ONLINE)
+		if(State() == IClient::STATE_CONNECTING && NetClient(CONN_MAIN).State() == NETSTATE_ONLINE)
 		{
 			// we switched to online
 			m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "client", "connected, sending info", CLIENT_NETWORK_PRINT_COLOR);
@@ -2788,14 +3131,27 @@ void CClient::PumpNetwork()
 		}
 
 		// progress on dummy connect when the connection is online
-		if(m_DummySendConnInfo && m_aNetClient[CONN_DUMMY].State() == NETSTATE_ONLINE)
+		if(m_DummySendConnInfo && NetClient(CONN_DUMMY).State() == NETSTATE_ONLINE)
 		{
 			m_DummySendConnInfo = false;
 			SendInfo(CONN_DUMMY);
-			m_aNetClient[CONN_DUMMY].Update();
+			NetClient(CONN_DUMMY).Update();
 			SendReady(CONN_DUMMY);
 			GameClient()->SendDummyInfo(true);
 			SendEnterGame(CONN_DUMMY);
+		}
+		for(int ExtraIndex = 0; ExtraIndex < MAX_DUMMY_CONNECTIONS - 1; ExtraIndex++)
+		{
+			const int Conn = ExtraIndex == 0 ? CONN_DUMMY2 : CONN_DUMMY3;
+			if(m_aAdditionalDummySendConnInfo[ExtraIndex] && NetClient(Conn).State() == NETSTATE_ONLINE)
+			{
+				m_aAdditionalDummySendConnInfo[ExtraIndex] = false;
+				SendInfo(Conn);
+				NetClient(Conn).Update();
+				SendReady(Conn);
+				SendExtraDummyInfo(Conn);
+				SendEnterGame(Conn);
+			}
 		}
 	}
 
@@ -2804,7 +3160,7 @@ void CClient::PumpNetwork()
 	SECURITY_TOKEN ResponseToken;
 	for(int Conn = 0; Conn < NUM_CONNS; Conn++)
 	{
-		while(m_aNetClient[Conn].Recv(&Packet, &ResponseToken, IsSixup()))
+		while(NetClient(Conn).Recv(&Packet, &ResponseToken, IsSixup()))
 		{
 			if(Packet.m_ClientId == -1)
 			{
@@ -2814,9 +3170,38 @@ void CClient::PumpNetwork()
 				ProcessConnlessPacket(&Packet);
 				continue;
 			}
+			if(Conn >= CONN_DUMMY && Conn <= CONN_DUMMY3)
+				ProcessDummyPacket(&Packet, Conn);
 			if(Conn == CONN_MAIN || Conn == CONN_DUMMY)
 			{
 				ProcessServerPacket(&Packet, Conn, g_Config.m_ClDummy ^ Conn);
+			}
+		}
+	}
+	if(State() == STATE_ONLINE)
+	{
+		for(int Conn = CONN_DUMMY; Conn <= CONN_DUMMY3; Conn++)
+		{
+			const bool Connected = Conn == CONN_DUMMY ? m_DummyConnected : m_aAdditionalDummyConnected[Conn - CONN_DUMMY2];
+			auto &Session = m_aDummySessions[m_aNetClientSlots[Conn] - 1];
+			if(!g_Config.m_ClDummyCopyMoves)
+				Session.CopyInput(nullptr);
+			if(Connected && (Conn != CONN_DUMMY || m_aReceivedSnapshots[1] < 2) && time_get() - Session.m_LastInputTime >= time_freq() / 25)
+				SendDummyInput(Conn, Conn == CONN_DUMMY && m_aReceivedSnapshots[1] < 2);
+		}
+		if(m_ActivateSelectedDummy && m_aReceivedSnapshots[1] >= 2)
+		{
+			m_ActivateSelectedDummy = false;
+			g_Config.m_ClDummy = 1;
+		}
+		if(m_RestoreDummyCount > 0 && !DummyConnecting())
+		{
+			if(DummyConnectedCount() < m_RestoreDummyCount)
+				DummyConnect();
+			else
+			{
+				DummySelect(m_RestoreDummySelected);
+				m_RestoreDummyCount = 0;
 			}
 		}
 	}
@@ -3031,7 +3416,7 @@ void CClient::Update()
 					SendInput();
 				}
 
-				if(g_Config.m_TcFastInput && GameClient()->CheckNewInput())
+				if((g_Config.m_TcFastInput || g_Config.m_BcInputs != 0) && GameClient()->CheckNewInput())
 				{
 					Repredict = true;
 				}
@@ -3238,7 +3623,7 @@ void CClient::InitInterfaces()
 
 	m_DemoEditor.Init(&m_SnapshotDelta, &m_SnapshotDeltaSixup, m_pConsole, m_pStorage);
 
-	m_ServerBrowser.SetBaseInfo(&m_aNetClient[CONN_CONTACT], m_pGameClient->NetVersion());
+	m_ServerBrowser.SetBaseInfo(&NetClient(CONN_CONTACT), m_pGameClient->NetVersion());
 
 #if defined(CONF_AUTOUPDATE)
 	m_Updater.Init();
@@ -3595,7 +3980,7 @@ void CClient::Run()
 			else
 			{
 				// Packets end the wait early. The wait can overshoot by a fraction of its duration, so approach the deadline in halving steps.
-				while(WaitTime > 0ns && net_socket_read_wait(m_aNetClient[CONN_MAIN].m_Socket, WaitTime > 1000us ? WaitTime / 2 : 0ns) == 0)
+				while(WaitTime > 0ns && net_socket_read_wait(NetClient(CONN_MAIN).m_Socket, WaitTime > 1000us ? WaitTime / 2 : 0ns) == 0)
 				{
 					WaitTime = Deadline - time_get_nanoseconds();
 				}
@@ -3638,7 +4023,7 @@ void CClient::Run()
 
 	// close sockets
 	for(unsigned int i = 0; i < std::size(m_aNetClient); i++)
-		m_aNetClient[i].Close();
+		NetClient(i).Close();
 
 	// shutdown text render while graphics are still available
 	m_pTextRender->Shutdown();
@@ -3681,6 +4066,14 @@ bool CClient::InitNetworkClientImpl(NETADDR BindAddr, int Conn, char *pError, si
 		pPort = &g_Config.m_ClDummyPort;
 		pName = "dummy";
 		break;
+	case CONN_DUMMY2:
+		pPort = &g_Config.m_ClDummyPort;
+		pName = "dummy2";
+		break;
+	case CONN_DUMMY3:
+		pPort = &g_Config.m_ClDummyPort;
+		pName = "dummy3";
+		break;
 	case CONN_CONTACT:
 		pPort = &g_Config.m_ClContactPort;
 		pName = "contact";
@@ -3688,7 +4081,7 @@ bool CClient::InitNetworkClientImpl(NETADDR BindAddr, int Conn, char *pError, si
 	default:
 		dbg_assert_failed("unreachable");
 	}
-	if(m_aNetClient[Conn].State() != NETSTATE_OFFLINE)
+	if(NetClient(Conn).State() != NETSTATE_OFFLINE)
 	{
 		str_format(pError, ErrorSize, "Could not open network client %s while already connected.", pName);
 		return false;
@@ -3698,7 +4091,7 @@ bool CClient::InitNetworkClientImpl(NETADDR BindAddr, int Conn, char *pError, si
 	BindAddr.port = *pPort;
 
 	unsigned RemainingAttempts = 25;
-	while(!m_aNetClient[Conn].Open(BindAddr))
+	while(!NetClient(Conn).Open(BindAddr))
 	{
 		--RemainingAttempts;
 		if(RemainingAttempts == 0)
@@ -3751,7 +4144,57 @@ void CClient::Con_DummyConnect(IConsole::IResult *pResult, void *pUserData)
 void CClient::Con_DummyDisconnect(IConsole::IResult *pResult, void *pUserData)
 {
 	CClient *pSelf = (CClient *)pUserData;
-	pSelf->DummyDisconnect(nullptr);
+	if(pResult->NumArguments() > 0)
+		pSelf->DummyDisconnectNumber(pResult->GetInteger(0));
+	else
+		pSelf->DummyDisconnect(nullptr);
+}
+
+void CClient::Con_DummySelect(IConsole::IResult *pResult, void *pUserData)
+{
+	static_cast<CClient *>(pUserData)->DummySelect(pResult->GetInteger(0));
+}
+
+void CClient::Con_DummyStatus(IConsole::IResult *pResult, void *pUserData)
+{
+	auto *pSelf = static_cast<CClient *>(pUserData);
+	char aBuf[256];
+	str_format(aBuf, sizeof(aBuf), "connected=%d/3 selected=%d received=%d", pSelf->DummyConnectedCount(), pSelf->DummySelected(), pSelf->m_aReceivedSnapshots[1]);
+	pSelf->m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "dummy", aBuf);
+	for(int Conn = CONN_DUMMY; Conn <= CONN_DUMMY3; Conn++)
+	{
+		const int Number = pSelf->m_aNetClientSlots[Conn];
+		const auto &Session = pSelf->m_aDummySessions[Number - 1];
+		int Id = pSelf->IsSixup() ? Session.m_LocalId7 : -1;
+		int X = 0, Y = 0;
+		const CSnapshot *pSnap = Session.Snapshot();
+		if(pSnap)
+		{
+			if(!pSelf->IsSixup())
+			{
+				for(int i = 0; i < pSnap->NumItems(); i++)
+				{
+					if(pSnap->GetItemType(i) == NETOBJTYPE_PLAYERINFO && pSnap->GetItemSize(i) >= static_cast<int>(sizeof(CNetObj_PlayerInfo)))
+					{
+						const auto *pInfo = reinterpret_cast<const CNetObj_PlayerInfo *>(pSnap->GetItem(i)->Data());
+						if(pInfo->m_Local)
+							Id = pInfo->m_ClientId;
+					}
+				}
+			}
+			const int Type = pSelf->IsSixup() ? static_cast<int>(protocol7::NETOBJTYPE_CHARACTER) : static_cast<int>(NETOBJTYPE_CHARACTER);
+			const int Index = pSnap->GetItemIndex((Type << 16) | Id);
+			if(Id >= 0 && Index >= 0 && pSnap->GetItemSize(Index) >= static_cast<int>(sizeof(CNetObj_CharacterCore)))
+			{
+				// Character core starts with tick/x/y in both wire protocols.
+				const int *pCore = pSnap->GetItem(Index)->Data();
+				X = pCore[1];
+				Y = pCore[2];
+			}
+		}
+		str_format(aBuf, sizeof(aBuf), "dummy=%d connected=%d ack=%d tick=%d local=%d x=%d y=%d direction=%d hook=%d flags=%d", Number, pSelf->DummyIsConnected(Number), Session.m_AckTick, Session.LastSnapshotTick(), Id, X, Y, Session.m_Input.m_Direction, Session.m_Input.m_Hook, Session.m_Input.m_PlayerFlags);
+		pSelf->m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "dummy", aBuf);
+	}
 }
 
 void CClient::Con_DummyResetInput(IConsole::IResult *pResult, void *pUserData)
@@ -4161,7 +4604,7 @@ const char *CClient::DemoPlayer_Play(const char *pFilename, int StorageType)
 		return Localize("No demo with this filename exists");
 
 	Disconnect();
-	m_aNetClient[CONN_MAIN].ResetErrorString();
+	NetClient(CONN_MAIN).ResetErrorString();
 
 	SetState(IClient::STATE_LOADING);
 	SetLoadingStateDetail(IClient::LOADING_STATE_DETAIL_LOADING_DEMO);
@@ -4712,7 +5155,9 @@ void CClient::RegisterCommands()
 	m_pConsole = Kernel()->RequestInterface<IConsole>();
 
 	m_pConsole->Register("dummy_connect", "", CFGFLAG_CLIENT, Con_DummyConnect, this, "Connect dummy");
-	m_pConsole->Register("dummy_disconnect", "", CFGFLAG_CLIENT, Con_DummyDisconnect, this, "Disconnect dummy");
+	m_pConsole->Register("dummy_select", "i[number]", CFGFLAG_CLIENT, Con_DummySelect, this, "Control main (0) or dummy 1, 2, 3");
+	m_pConsole->Register("dummy_status", "", CFGFLAG_CLIENT, Con_DummyStatus, this, "Show each dummy connection and snapshot acknowledgement");
+	m_pConsole->Register("dummy_disconnect", "?i[number]", CFGFLAG_CLIENT, Con_DummyDisconnect, this, "Disconnect all dummies, or only dummy 1, 2, 3");
 	m_pConsole->Register("dummy_reset", "", CFGFLAG_CLIENT, Con_DummyResetInput, this, "Reset dummy");
 
 	m_pConsole->Register("quit", "", CFGFLAG_CLIENT | CFGFLAG_STORE, Con_Quit, this, "Quit the client");
@@ -5214,6 +5659,8 @@ int main(int argc, const char **argv)
 	IDiscord *pDiscord = CreateDiscord();
 	pKernel->RegisterInterface(pDiscord);
 
+	if(g_Config.m_QmSteamAutoLaunch)
+		SteamOpenClient();
 	ISteam *pSteam = CreateSteam();
 	pKernel->RegisterInterface(pSteam);
 
@@ -5549,7 +5996,7 @@ int CClient::UdpConnectivity(int NetType)
 		}
 		NETADDR GlobalUdpAddr;
 		int NewConnectivity;
-		switch(m_aNetClient[CONN_MAIN].GetConnectivity(PossibleNetType, &GlobalUdpAddr))
+		switch(NetClient(CONN_MAIN).GetConnectivity(PossibleNetType, &GlobalUdpAddr))
 		{
 		case CONNECTIVITY::UNKNOWN:
 			NewConnectivity = CONNECTIVITY_UNKNOWN;

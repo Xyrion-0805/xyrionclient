@@ -89,7 +89,7 @@ CInput::CInput()
 	m_MouseFocus = true;
 
 	m_CompositionCursor = 0;
-	m_CandidateSelectedIndex = -1;
+	m_ImeCandidates.Clear();
 
 	m_aDropFile[0] = '\0';
 }
@@ -356,7 +356,7 @@ void CInput::StopTextInput()
 	SDL_EventState(SDL_SYSWMEVENT, SDL_DISABLE);
 	m_CompositionString = "";
 	m_CompositionCursor = 0;
-	m_vCandidates.clear();
+	m_ImeCandidates.EndComposition();
 }
 
 void CInput::EnsureScreenKeyboardShown()
@@ -596,6 +596,7 @@ void CInput::HandleTextEditingEvent(const char *pText, int Start, int Length)
 {
 	if(pText[0] != '\0')
 	{
+		m_ImeCandidates.ResumeComposition();
 		m_CompositionString = pText;
 		m_CompositionCursor = 0;
 		for(int i = 0; i < Start; i++)
@@ -769,6 +770,7 @@ int CInput::Update()
 #endif
 
 		case SDL_TEXTINPUT:
+			m_ImeCandidates.EndComposition();
 			m_CompositionString = "";
 			m_CompositionCursor = 0;
 			AddTextEvent(Event.text.text);
@@ -912,48 +914,136 @@ int CInput::Update()
 	return 0;
 }
 
+void CInput::ClearImeCandidates()
+{
+	m_ImeCandidates.Clear();
+}
+
+void CInput::ClearImeState()
+{
+	m_CompositionString.clear();
+	m_CompositionCursor = 0;
+	ClearImeCandidates();
+}
+
+#if defined(CONF_FAMILY_WINDOWS)
+std::optional<SQmImeCandidateList> CInput::ReadWindowsImeCandidates(void *pWindow, unsigned CandidateListFlags)
+{
+	if(pWindow == nullptr)
+		return std::nullopt;
+	HWND WindowHandle = static_cast<HWND>(pWindow);
+
+
+	HIMC ImeContext = ImmGetContext(WindowHandle);
+
+	if(ImeContext == nullptr)
+		return std::nullopt;
+
+	LPCANDIDATELIST pCandidateList = nullptr;
+	DWORD Size = 0;
+	const auto LoadCandidateList = [&](DWORD CandidateListIndex) {
+
+		DWORD CandidateListSize = ImmGetCandidateListW(ImeContext, CandidateListIndex, nullptr, 0);
+
+		if(CandidateListSize == 0)
+			return false;
+
+		LPCANDIDATELIST pLoadedCandidateList = (LPCANDIDATELIST)malloc(CandidateListSize);
+		if(pLoadedCandidateList == nullptr)
+			return false;
+
+		const DWORD RequestedSize = CandidateListSize;
+
+		CandidateListSize = ImmGetCandidateListW(ImeContext, CandidateListIndex, pLoadedCandidateList, RequestedSize);
+
+		if(CandidateListSize == 0 || CandidateListSize > RequestedSize)
+		{
+			free(pLoadedCandidateList);
+			return false;
+		}
+
+		free(pCandidateList);
+		pCandidateList = pLoadedCandidateList;
+		Size = CandidateListSize;
+		return true;
+	};
+	for(DWORD CandidateListIndex = 0; CandidateListIndex < 32; ++CandidateListIndex)
+	{
+		if(!QmImeNotifyFlagsIncludeCandidateList(CandidateListFlags, CandidateListIndex))
+			continue;
+		if(LoadCandidateList(CandidateListIndex))
+			break;
+	}
+	if(pCandidateList == nullptr && CandidateListFlags != 0 && !QmImeNotifyFlagsIncludeCandidateList(CandidateListFlags, 0))
+		LoadCandidateList(0);
+
+	SQmImeCandidateList LoadedCandidates;
+	bool LoadSucceeded = false;
+	if(pCandidateList && Size >= offsetof(CANDIDATELIST, dwOffset))
+	{
+		const size_t BufferSize = Size;
+		const size_t HeaderSize = offsetof(CANDIDATELIST, dwOffset);
+		const size_t AvailableOffsets = QmImeCandidateOffsetCapacity(BufferSize, HeaderSize);
+		const DWORD CandidateCount = std::min<DWORD>(pCandidateList->dwCount, (DWORD)AvailableOffsets);
+		const DWORD PageStart = std::min(pCandidateList->dwPageStart, CandidateCount);
+		const DWORD PageSize = (DWORD)QmImeCandidatePageSizeOrCount(pCandidateList->dwPageSize, CandidateCount);
+		const DWORD PageEnd = PageStart + std::min(PageSize, CandidateCount - PageStart);
+		const auto *pBufferBegin = reinterpret_cast<const unsigned char *>(pCandidateList);
+		LoadedCandidates.m_PageStart = (int)PageStart;
+		LoadedCandidates.m_PageSize = (int)PageSize;
+		LoadedCandidates.m_TotalCount = (int)CandidateCount;
+		LoadedCandidates.m_vCandidates.reserve(PageEnd - PageStart);
+		for(DWORD i = PageStart; i < PageEnd; i++)
+		{
+			const size_t Offset = pCandidateList->dwOffset[i];
+			const std::optional<size_t> CandidateLength = QmImeBoundedUtf16Length(pBufferBegin, BufferSize, Offset);
+			if(!CandidateLength.has_value())
+				continue;
+			const auto *pCandidate = reinterpret_cast<const wchar_t *>(pBufferBegin + Offset);
+			const auto Candidate = windows_wide_to_utf8_bounded(pCandidate, pCandidate + *CandidateLength + 1);
+			if(Candidate.has_value())
+				LoadedCandidates.m_vCandidates.push_back(*Candidate);
+		}
+		if(pCandidateList->dwSelection >= PageStart && pCandidateList->dwSelection < PageEnd)
+			LoadedCandidates.m_SelectedIndex = (int)pCandidateList->dwSelection - (int)PageStart;
+		LoadSucceeded = true;
+	}
+
+	free(pCandidateList);
+
+	ImmReleaseContext(WindowHandle, ImeContext);
+
+	if(LoadSucceeded)
+		return LoadedCandidates;
+	return std::nullopt;
+}
+
+#endif
+
 void CInput::ProcessSystemMessage(SDL_SysWMmsg *pMsg)
 {
 #if defined(CONF_FAMILY_WINDOWS)
-	// Todo SDL: remove this after SDL2 supports IME candidates
-	if(pMsg->subsystem == SDL_SYSWM_WINDOWS && pMsg->msg.win.msg == WM_IME_NOTIFY)
+	if(pMsg == nullptr || pMsg->subsystem != SDL_SYSWM_WINDOWS)
+		return;
+
+	if(pMsg->msg.win.msg == WM_IME_ENDCOMPOSITION)
+	{
+		// 删除或取消组合输入时也要清理旧候选，不能只依赖文本提交或关闭候选通知。
+		ClearImeState();
+		m_ImeCandidates.EndComposition();
+		return;
+	}
+
+	if(pMsg->msg.win.msg == WM_IME_NOTIFY)
 	{
 		switch(pMsg->msg.win.wParam)
 		{
 		case IMN_OPENCANDIDATE:
 		case IMN_CHANGECANDIDATE:
-		{
-			HWND WindowHandle = pMsg->msg.win.hwnd;
-			HIMC ImeContext = ImmGetContext(WindowHandle);
-			DWORD Size = ImmGetCandidateListW(ImeContext, 0, nullptr, 0);
-			LPCANDIDATELIST pCandidateList = nullptr;
-			if(Size > 0)
-			{
-				pCandidateList = (LPCANDIDATELIST)malloc(Size);
-				Size = ImmGetCandidateListW(ImeContext, 0, pCandidateList, Size);
-			}
-			m_vCandidates.clear();
-			if(pCandidateList && Size > 0)
-			{
-				m_vCandidates.reserve(std::min(pCandidateList->dwCount - pCandidateList->dwPageStart, pCandidateList->dwPageSize));
-				for(DWORD i = pCandidateList->dwPageStart; i < pCandidateList->dwCount && (int)m_vCandidates.size() < (int)pCandidateList->dwPageSize; i++)
-				{
-					LPCWSTR pCandidate = (LPCWSTR)((DWORD_PTR)pCandidateList + pCandidateList->dwOffset[i]);
-					m_vCandidates.push_back(windows_wide_to_utf8(pCandidate).value_or("<invalid candidate>"));
-				}
-				m_CandidateSelectedIndex = pCandidateList->dwSelection - pCandidateList->dwPageStart;
-			}
-			else
-			{
-				m_CandidateSelectedIndex = -1;
-			}
-			free(pCandidateList);
-			ImmReleaseContext(WindowHandle, ImeContext);
+			m_ImeCandidates.UpdateFromNative(ReadWindowsImeCandidates(pMsg->msg.win.hwnd, (unsigned)pMsg->msg.win.lParam), pMsg->msg.win.wParam == IMN_OPENCANDIDATE);
 			break;
-		}
 		case IMN_CLOSECANDIDATE:
-			m_vCandidates.clear();
-			m_CandidateSelectedIndex = -1;
+			ClearImeCandidates();
 			break;
 		}
 	}

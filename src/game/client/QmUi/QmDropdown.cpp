@@ -1,0 +1,279 @@
+/* (c) Magnus Auvinen. See licence.txt in the root of the distribution for more information. */
+/* If you are missing that file, acquire a complete release at teeworlds.com.                */
+#include "QmDropdown.h"
+
+#include <base/dbg.h>
+#include <base/str.h>
+#include <base/mem.h>
+#include <base/time.h>
+
+#include <algorithm>
+#include <cmath>
+
+bool CQmDropdownSearch::Update(const std::vector<std::string> &vEntries, const char *pQuery)
+{
+	const std::string Query = pQuery != nullptr ? pQuery : "";
+	if(m_Initialized && m_vSource == vEntries && m_Query == Query)
+		return false;
+	m_Initialized = true;
+	m_vSource = vEntries;
+	m_Query = Query;
+	m_vIndices.clear();
+	for(size_t Index = 0; Index < vEntries.size(); ++Index)
+		if(Query.empty() || str_utf8_find_nocase(vEntries[Index].c_str(), Query.c_str()))
+			m_vIndices.push_back(Index);
+	return true;
+}
+
+int CQmDropdownSearch::SourceIndex(int VisibleIndex) const
+{
+	return VisibleIndex >= 0 && VisibleIndex < static_cast<int>(m_vIndices.size()) ? m_vIndices[VisibleIndex] : -1;
+}
+
+void CQmDropdownSearch::Reset()
+{
+	m_Initialized = false;
+	m_vSource.clear();
+	m_Query.clear();
+	m_vIndices.clear();
+}
+
+namespace
+{
+	bool RectsOverlap(const CUIRect &A, const CUIRect &B)
+	{
+		return A.x < B.x + B.w && A.x + A.w > B.x && A.y < B.y + B.h && A.y + A.h > B.y;
+	}
+
+	float ResolvePopupHeightForAvailableSpace(const SQmDropdownGeometryConfig &Config, const float RequestedHeight, const float AvailableHeight)
+	{
+		const float CandidateHeight = std::min(std::max(0.0f, RequestedHeight), std::max(0.0f, AvailableHeight));
+		const float RowHeight = std::max(0.0f, Config.m_RowHeight);
+		if(RowHeight <= 0.0f)
+			return CandidateHeight;
+
+		const float RowSpacing = std::max(0.0f, Config.m_RowSpacing);
+		const float FixedHeight = std::min(std::max(0.0f, Config.m_FixedHeight), CandidateHeight);
+		const float LeadingRowSpacing = std::min(std::max(0.0f, Config.m_LeadingRowSpacing), CandidateHeight - FixedHeight);
+		const float RowArea = CandidateHeight - FixedHeight - LeadingRowSpacing;
+		const float RowExtent = RowHeight + RowSpacing;
+		if(RowArea + 0.001f < RowHeight || RowExtent <= 0.0f)
+			return 0.0f;
+
+		const int CompleteRows = std::max(0, (int)std::floor((RowArea + RowSpacing + 0.001f) / RowExtent));
+		if(CompleteRows <= 0)
+			return 0.0f;
+		return FixedHeight + LeadingRowSpacing + CompleteRows * RowHeight + (CompleteRows - 1) * RowSpacing;
+	}
+}
+
+SQmDropdownGeometryResult QmComputeDropdownPopupGeometry(const CUIRect &AnchorRect, const CUIRect &ViewportRect, const SQmDropdownGeometryConfig &Config)
+{
+	SQmDropdownGeometryResult Result;
+	Result.m_AnchorVisible = QmDropdownAnchorFullyVisible(AnchorRect, ViewportRect);
+
+	const float Margin = std::max(0.0f, Config.m_Margin);
+	const float Gap = std::max(0.0f, Config.m_Gap);
+	const float MinX = ViewportRect.x + Margin;
+	const float MinY = ViewportRect.y + Margin;
+	const float MaxX = ViewportRect.x + std::max(0.0f, ViewportRect.w - Margin);
+	const float MaxY = ViewportRect.y + std::max(0.0f, ViewportRect.h - Margin);
+	const float AvailableWidth = std::max(0.0f, MaxX - MinX);
+	const float AvailableHeight = std::max(0.0f, MaxY - MinY);
+
+	Result.m_Rect.w = Config.m_AlignToAnchor ? std::max(0.0f, Config.m_Width) : std::min(std::max(0.0f, Config.m_Width), AvailableWidth);
+	const float RequestedHeight = std::max(0.0f, Config.m_Height);
+
+	const float BelowY = AnchorRect.y + AnchorRect.h + Gap;
+	const float BelowAvailable = std::min(AvailableHeight, std::max(0.0f, MaxY - (AnchorRect.y + AnchorRect.h + Gap)));
+	const float AboveAvailable = std::min(AvailableHeight, std::max(0.0f, AnchorRect.y - Gap - MinY));
+	const float BelowHeight = ResolvePopupHeightForAvailableSpace(Config, RequestedHeight, BelowAvailable);
+	const float AboveHeight = ResolvePopupHeightForAvailableSpace(Config, RequestedHeight, AboveAvailable);
+	const bool FitsBelow = BelowAvailable + 0.001f >= RequestedHeight;
+	const bool FitsAbove = AboveAvailable + 0.001f >= RequestedHeight;
+	if(FitsBelow && (!FitsAbove || Config.m_PreferBelow))
+	{
+		Result.m_PlacedBelow = true;
+		Result.m_Rect.h = BelowHeight;
+	}
+	else if(FitsAbove)
+	{
+		Result.m_PlacedBelow = false;
+		Result.m_Rect.h = AboveHeight;
+	}
+	else if(BelowHeight > 0.0f || AboveHeight > 0.0f)
+	{
+		Result.m_PlacedBelow = Config.m_PreferBelow ? BelowHeight >= AboveHeight : BelowHeight > AboveHeight;
+		Result.m_Rect.h = Result.m_PlacedBelow ? BelowHeight : AboveHeight;
+	}
+	else
+	{
+		Result.m_Rect.h = 0.0f;
+	}
+
+	Result.m_Rect.x = AnchorRect.x;
+	Result.m_Rect.y = Result.m_PlacedBelow ? BelowY : AnchorRect.y - Gap - Result.m_Rect.h;
+
+	// 对齐模式保持左缘与锚点严格相等（外框包裹的对齐判定依赖它），
+	// 不做水平钳制；普通模式钳进 viewport 防溢出。
+	const float ClampedX = Config.m_AlignToAnchor ? Result.m_Rect.x : std::clamp(Result.m_Rect.x, MinX, std::max(MinX, MaxX - Result.m_Rect.w));
+	const float ClampedY = std::clamp(Result.m_Rect.y, MinY, std::max(MinY, MaxY - Result.m_Rect.h));
+	Result.m_Clamped = ClampedX != Result.m_Rect.x || ClampedY != Result.m_Rect.y || Result.m_Rect.w != Config.m_Width || Result.m_Rect.h != Config.m_Height;
+	Result.m_Rect.x = ClampedX;
+	Result.m_Rect.y = ClampedY;
+	Result.m_PopupVisible = Result.m_Rect.w > 0.0f && Result.m_Rect.h > 0.0f && RectsOverlap(Result.m_Rect, ViewportRect);
+	return Result;
+}
+
+SQmDropdownPopupPolicy QmResolveDropdownPopupPolicy(int ItemCount, float EntryHeight, float EntrySpacing, bool HasMessage, float MessageHeight, float OuterHeight, int MinimumVisibleItems)
+{
+	SQmDropdownPopupPolicy Policy;
+	const int ClampedItemCount = std::max(0, ItemCount);
+	Policy.m_ItemCount = ClampedItemCount;
+	const int VisibleItemCount = std::min(std::max(ClampedItemCount, std::max(0, MinimumVisibleItems)), Policy.m_MaxVisibleItems);
+	const float ResolvedEntryHeight = std::max(0.0f, EntryHeight);
+	const float ResolvedEntrySpacing = std::max(0.0f, EntrySpacing);
+	const float ResolvedMessageHeight = HasMessage ? std::max(0.0f, MessageHeight) : 0.0f;
+	const float ResolvedOuterHeight = std::max(0.0f, OuterHeight);
+	const auto ItemsHeight = [ResolvedEntryHeight, ResolvedEntrySpacing, HasMessage](int Count) {
+		if(Count <= 0)
+			return 0.0f;
+		return Count * ResolvedEntryHeight + (HasMessage ? Count : Count - 1) * ResolvedEntrySpacing;
+	};
+	Policy.m_ContentHeight = ResolvedMessageHeight + ItemsHeight(ClampedItemCount) + ResolvedOuterHeight;
+	Policy.m_PreferredHeight = ResolvedMessageHeight + ItemsHeight(VisibleItemCount) + ResolvedOuterHeight;
+	return Policy;
+}
+
+bool QmDropdownPopupScrollable(const SQmDropdownPopupPolicy &Policy, float PopupHeight)
+{
+	return std::max(0.0f, PopupHeight) + 0.001f < Policy.m_ContentHeight;
+}
+
+bool QmDropdownPopupBlocksUnderlying(const bool PopupVisible)
+{
+	return PopupVisible;
+}
+
+bool QmDropdownSourceAlive(const uint64_t CurrentFrame, const uint64_t LastSourceFrame, const bool AnchorFullyVisible)
+{
+	// 来源最多允许跨一帧刷新；先比较再相减，避免帧号加法溢出。
+	return AnchorFullyVisible && CurrentFrame >= LastSourceFrame && CurrentFrame - LastSourceFrame <= 1;
+}
+
+bool QmDropdownShouldKeepPopupAliveWhenDisabled(const bool PopupOpen, const bool ClosePopupWhenDisabled)
+{
+	// 下拉触发器所在的父弹层失去 Active 后，子弹层仍需刷新来源帧；真正要求关闭的
+	// 禁用控件由 ClosePopupWhenDisabled 控制，不能因为父层失焦而误关子弹层。
+	return PopupOpen && !ClosePopupWhenDisabled;
+}
+
+bool QmDropdownAnchorFullyVisible(const CUIRect &AnchorRect, const CUIRect &ViewportRect)
+{
+	constexpr float EdgeTolerance = 0.01f;
+	return AnchorRect.w > 0.0f && AnchorRect.h > 0.0f &&
+	       AnchorRect.x + EdgeTolerance >= ViewportRect.x && AnchorRect.y + EdgeTolerance >= ViewportRect.y &&
+	       AnchorRect.x + AnchorRect.w <= ViewportRect.x + ViewportRect.w + EdgeTolerance &&
+	       AnchorRect.y + AnchorRect.h <= ViewportRect.y + ViewportRect.h + EdgeTolerance;
+}
+
+bool QmDropdownActiveItemShouldScrollIntoView(const bool ScrollRequested, const bool ActiveEntry)
+{
+	return ScrollRequested && ActiveEntry;
+}
+
+bool QmDropdownShouldRequestActiveScroll(const bool PopupOpen, const int PreviousActiveIndex, const int ActiveIndex)
+{
+	// 已打开弹层只有键盘等方式真正改变 active item 时才重新定位；普通重绘、
+	// 滚轮和滚动条拖动都必须保留用户当前 offset。
+	return PopupOpen && PreviousActiveIndex != ActiveIndex;
+}
+
+bool QmDropdownEntriesMatch(const std::vector<std::string> &vEntries, const char *const *pEntries, const int ItemCount)
+{
+	if(ItemCount < 0 || vEntries.size() != (size_t)ItemCount)
+		return false;
+	for(int Index = 0; Index < ItemCount; ++Index)
+	{
+		if(vEntries[Index] != pEntries[Index])
+			return false;
+	}
+	return true;
+}
+
+int QmResolveDropdownSelection(const int CurrentSelection, const int PopupSelection, const std::vector<std::string> &vPopupEntries, const char *const *pEntries, const int ItemCount)
+{
+	// 弹层回调与来源提交跨帧执行，旧列表的下标不能套用到已变化的列表。
+	return PopupSelection >= 0 && PopupSelection < ItemCount && QmDropdownEntriesMatch(vPopupEntries, pEntries, ItemCount) ? PopupSelection : CurrentSelection;
+}
+
+void CQmDropdownState::Reset()
+{
+	m_Open = false;
+	m_ActiveIndex = -1;
+}
+
+bool CQmDropdownState::Disable(const bool PopupOpen)
+{
+	Reset();
+	return PopupOpen;
+}
+
+SQmDropdownUpdateResult CQmDropdownState::Update(const SQmDropdownInput &Input, int ItemCount)
+{
+	SQmDropdownUpdateResult Result;
+	ItemCount = std::max(0, ItemCount);
+
+	if(!m_Open)
+	{
+		if(Input.m_TogglePressed && ItemCount > 0)
+		{
+			m_Open = true;
+			m_ActiveIndex = Input.m_InitialIndex >= 0 && Input.m_InitialIndex < ItemCount ? Input.m_InitialIndex : 0;
+			Result.m_Opened = true;
+		}
+		return Result;
+	}
+
+	Result = QmUpdateDropdownPopupSelection(Input, ItemCount, true, m_ActiveIndex);
+	if(Result.m_Closed)
+		Reset();
+	return Result;
+}
+
+SQmDropdownUpdateResult QmUpdateDropdownPopupSelection(const SQmDropdownInput &Input, int ItemCount, const bool Active, int &ActiveIndex)
+{
+	SQmDropdownUpdateResult Result;
+	if(!Active)
+		return Result;
+	if((ItemCount <= 0 && !Input.m_KeepOpenWhenEmpty) || Input.m_KeyEscape || Input.m_ClickOutside || Input.m_TogglePressed)
+	{
+		Result.m_Closed = true;
+		return Result;
+	}
+	if(ItemCount <= 0)
+	{
+		ActiveIndex = -1;
+		return Result;
+	}
+
+	ActiveIndex = std::clamp(ActiveIndex, 0, ItemCount - 1);
+	if(Input.m_HoveredIndex >= 0 && Input.m_HoveredIndex < ItemCount)
+		ActiveIndex = Input.m_HoveredIndex;
+
+	if(Input.m_KeyUp)
+		ActiveIndex = (ActiveIndex + ItemCount - 1) % ItemCount;
+	if(Input.m_KeyDown)
+		ActiveIndex = (ActiveIndex + 1) % ItemCount;
+
+	if(Input.m_KeyEnter || (Input.m_MouseSelectPressed && Input.m_HoveredIndex >= 0 && Input.m_HoveredIndex < ItemCount))
+	{
+		if(Input.m_MouseSelectPressed)
+			ActiveIndex = Input.m_HoveredIndex;
+		Result.m_Selected = true;
+		Result.m_SelectedIndex = ActiveIndex;
+		Result.m_Closed = true;
+	}
+
+	return Result;
+}

@@ -1,6 +1,8 @@
 /* (c) Magnus Auvinen. See licence.txt in the root of the distribution for more information. */
 /* If you are missing that file, acquire a complete release at teeworlds.com.                */
 #include "skins7.h"
+#include "qmclient/qm_chat_avatar.h"
+#include <generated/client_data7.h>
 
 #include "menus.h"
 
@@ -40,10 +42,47 @@ int unsigned *CSkins7::ms_apColorVariables[NUM_DUMMIES][protocol7::NUM_SKINPARTS
 // TODO: uncomment
 // const float MIN_EYE_BODY_COLOR_DIST = 80.f; // between body and eyes (LAB color space)
 
+static std::shared_ptr<const QmChatAvatar::SSource> CreateChatAvatarPartSource(const CImageInfo &Image, int Part)
+{
+	using namespace QmChatAvatar;
+	auto pSource = std::make_shared<SSource>();
+	const auto Copy = [&](ESprite Target, int Sprite) {
+		pSource->m_aSprites[Target] = CopySprite(Image, client_data7::g_pData->m_aSprites[Sprite]);
+	};
+	switch(Part)
+	{
+	case protocol7::SKINPART_BODY:
+		Copy(BODY, client_data7::SPRITE_TEE_BODY);
+		Copy(BODY_OUTLINE, client_data7::SPRITE_TEE_BODY_OUTLINE);
+		Copy(SHADOW, client_data7::SPRITE_TEE_BODY_SHADOW);
+		Copy(UPPER_OUTLINE, client_data7::SPRITE_TEE_BODY_UPPER_OUTLINE);
+		break;
+	case protocol7::SKINPART_FEET:
+		Copy(FEET, client_data7::SPRITE_TEE_FOOT);
+		Copy(FEET_OUTLINE, client_data7::SPRITE_TEE_FOOT_OUTLINE);
+		break;
+	case protocol7::SKINPART_EYES:
+		Copy(EYES, client_data7::SPRITE_TEE_EYES_NORMAL);
+		break;
+	case protocol7::SKINPART_MARKING:
+		Copy(MARKING, client_data7::SPRITE_TEE_MARKING);
+		break;
+	case protocol7::SKINPART_DECORATION:
+		Copy(DECORATION, client_data7::SPRITE_TEE_DECORATION);
+		Copy(DECORATION_OUTLINE, client_data7::SPRITE_TEE_DECORATION_OUTLINE);
+		break;
+	default:
+		return nullptr;
+	}
+	return pSource;
+}
+
 void CSkins7::CSkinPart::ApplyTo(CTeeRenderInfo::CSixup &SixupRenderInfo) const
 {
 	SixupRenderInfo.m_aOriginalTextures[m_Type] = m_OriginalTexture;
 	SixupRenderInfo.m_aColorableTextures[m_Type] = m_ColorableTexture;
+	SixupRenderInfo.m_apChatAvatarOriginal[m_Type] = m_pChatAvatarOriginal;
+	SixupRenderInfo.m_apChatAvatarColorable[m_Type] = m_pChatAvatarColorable;
 	if(m_Type == protocol7::SKINPART_BODY)
 	{
 		SixupRenderInfo.m_BloodColor = m_BloodColor;
@@ -162,7 +201,9 @@ bool CSkins7::LoadSkinPart(int PartType, const char *pName, int DirType)
 	str_copy(Part.m_aName, pName, std::min(PartNameSize + 1, sizeof(Part.m_aName)));
 	Part.m_OriginalTexture = Graphics()->LoadTextureRaw(Info, 0, aFilename);
 	Part.m_BloodColor = DetermineBloodColor(Part.m_Type, Info);
+	Part.m_pChatAvatarOriginal = CreateChatAvatarPartSource(Info, PartType);
 	ConvertToGrayscale(Info);
+	Part.m_pChatAvatarColorable = CreateChatAvatarPartSource(Info, PartType);
 	Part.m_ColorableTexture = Graphics()->LoadTextureRawMove(Info, 0, aFilename);
 
 	if(Config()->m_Debug)

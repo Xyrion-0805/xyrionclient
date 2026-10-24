@@ -7,6 +7,7 @@
 
 void CSkin::CSkinTextures::Reset()
 {
+	m_QmChatAvatar.reset();
 	m_Body = IGraphics::CTextureHandle();
 	m_BodyOutline = IGraphics::CTextureHandle();
 	m_Feet = IGraphics::CTextureHandle();
@@ -21,6 +22,7 @@ void CSkin::CSkinTextures::Reset()
 
 void CSkin::CSkinTextures::Unload(IGraphics *pGraphics)
 {
+	m_QmChatAvatar.reset();
 	pGraphics->UnloadTexture(&m_Body);
 	pGraphics->UnloadTexture(&m_BodyOutline);
 	pGraphics->UnloadTexture(&m_Feet);

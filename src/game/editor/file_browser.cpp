@@ -1,3 +1,4 @@
+#include <game/editor/localization.h>
 /* (c) Magnus Auvinen. See licence.txt in the root of the distribution for more information. */
 /* If you are missing that file, acquire a complete release at teeworlds.com.                */
 
@@ -129,7 +130,7 @@ void CFileBrowser::Render()
 		static constexpr const char *SORT_INDICATORS[] = {"", "▲", "▼"};
 
 		char aLabelButtonSortTimeModified[64];
-		str_format(aLabelButtonSortTimeModified, sizeof(aLabelButtonSortTimeModified), "Time modified %s", SORT_INDICATORS[(int)m_SortByTimeModified]);
+		str_format(aLabelButtonSortTimeModified, sizeof(aLabelButtonSortTimeModified), EditorLocalize("Time modified %s"), SORT_INDICATORS[(int)m_SortByTimeModified]);
 		if(Editor()->DoButton_Editor(&m_ButtonSortTimeModifiedId, aLabelButtonSortTimeModified, 0, &ButtonTimeModified, BUTTONFLAG_LEFT, "Sort by time modified."))
 		{
 			if(m_SortByTimeModified == ESortDirection::ASCENDING)
@@ -149,7 +150,7 @@ void CFileBrowser::Render()
 		}
 
 		char aLabelButtonSortFilename[64];
-		str_format(aLabelButtonSortFilename, sizeof(aLabelButtonSortFilename), "Filename %s", SORT_INDICATORS[(int)m_SortByFilename]);
+		str_format(aLabelButtonSortFilename, sizeof(aLabelButtonSortFilename), EditorLocalize("Filename %s"), SORT_INDICATORS[(int)m_SortByFilename]);
 		if(Editor()->DoButton_Editor(&m_ButtonSortFilenameId, aLabelButtonSortFilename, 0, &ButtonFilename, BUTTONFLAG_LEFT, "Sort by filename."))
 		{
 			if(m_SortByFilename == ESortDirection::DESCENDING)
@@ -170,7 +171,7 @@ void CFileBrowser::Render()
 	// Title
 	Title.Draw(ColorRGBA(1.0f, 1.0f, 1.0f, 0.25f), IGraphics::CORNER_ALL, 5.0f);
 	Title.VMargin(10.0f, &Title);
-	Ui()->DoLabel(&Title, m_aTitle, 12.0f, TEXTALIGN_ML);
+	Ui()->DoLabel(&Title, EditorLocalize(m_aTitle), 12.0f, TEXTALIGN_ML);
 
 	// Current path
 	if(m_SelectedFileIndex >= 0 && m_vpFilteredFileList[m_SelectedFileIndex]->m_StorageType >= IStorage::TYPE_SAVE)
@@ -178,7 +179,7 @@ void CFileBrowser::Render()
 		char aPath[IO_MAX_PATH_LENGTH];
 		Storage()->GetCompletePath(m_vpFilteredFileList[m_SelectedFileIndex]->m_StorageType, m_pCurrentPath, aPath, sizeof(aPath));
 		char aPathLabel[128 + IO_MAX_PATH_LENGTH];
-		str_format(aPathLabel, sizeof(aPathLabel), "Current path: %s", aPath);
+		str_format(aPathLabel, sizeof(aPathLabel), EditorLocalize("Current path: %s"), aPath);
 		Ui()->DoLabel(&PathBox, aPathLabel, 10.0f, TEXTALIGN_ML, {.m_MaxWidth = PathBox.w, .m_EllipsisAtEnd = true});
 	}
 
@@ -188,7 +189,7 @@ void CFileBrowser::Render()
 	if(m_SaveAction)
 	{
 		// Filename input when saving
-		Ui()->DoLabel(&FileBoxLabel, "Filename:", 10.0f, TEXTALIGN_ML);
+		Ui()->DoLabel(&FileBoxLabel, EditorLocalize("Filename:"), 10.0f, TEXTALIGN_ML);
 		if(Ui()->DoEditBox(&m_FilenameInput, &FileBox, 10.0f))
 		{
 			UpdateSelectedIndex(m_FilenameInput.GetString());
@@ -197,7 +198,7 @@ void CFileBrowser::Render()
 	else
 	{
 		// Filter input when loading
-		Ui()->DoLabel(&FileBoxLabel, "Search:", 10.0f, TEXTALIGN_ML);
+		Ui()->DoLabel(&FileBoxLabel, EditorLocalize("Search:"), 10.0f, TEXTALIGN_ML);
 		if(Input()->KeyPress(KEY_F) && Input()->ModifierIsPressed())
 		{
 			Ui()->SetActiveItem(&m_FilterInput);
@@ -558,7 +559,7 @@ void CFileBrowser::RenderFilePreview(CUIRect Preview)
 		}
 		else if(m_PreviewState == EPreviewState::ERROR)
 		{
-			Ui()->DoLabel(&Preview, "Failed to load the image (check the local console for details).", 12.0f, TEXTALIGN_TL, {.m_MaxWidth = Preview.w});
+			Ui()->DoLabel(&Preview, EditorLocalize("Failed to load the image (check the local console for details)."), 12.0f, TEXTALIGN_TL, {.m_MaxWidth = Preview.w});
 		}
 	}
 	else if(m_FileType == CFileBrowser::EFileType::SOUND)
@@ -571,7 +572,7 @@ void CFileBrowser::RenderFilePreview(CUIRect Preview)
 		}
 		else if(m_PreviewState == EPreviewState::ERROR)
 		{
-			Ui()->DoLabel(&Preview, "Failed to load the sound (check the local console for details). Make sure you enabled sounds in the settings.", 12.0f, TEXTALIGN_TL, {.m_MaxWidth = Preview.w});
+			Ui()->DoLabel(&Preview, EditorLocalize("Failed to load the sound (check the local console for details). Make sure you enabled sounds in the settings."), 12.0f, TEXTALIGN_TL, {.m_MaxWidth = Preview.w});
 		}
 	}
 }
@@ -862,11 +863,11 @@ CUi::EPopupMenuFunctionResult CFileBrowser::CPopupNewFolder::Render(void *pConte
 	ButtonBar.VSplitRight(110.0f, &ButtonBar, &ButtonCreate);
 
 	View.HSplitTop(20.0f, &Label, &View);
-	pFileBrowser->Ui()->DoLabel(&Label, "Create new folder", 20.0f, TEXTALIGN_MC);
+	pFileBrowser->Ui()->DoLabel(&Label, EditorLocalize("Create new folder"), 20.0f, TEXTALIGN_MC);
 	View.HSplitTop(10.0f, nullptr, &View);
 
 	View.HSplitTop(20.0f, &Label, &View);
-	pFileBrowser->Ui()->DoLabel(&Label, "Name:", 10.0f, TEXTALIGN_ML);
+	pFileBrowser->Ui()->DoLabel(&Label, EditorLocalize("Name:"), 10.0f, TEXTALIGN_ML);
 	Label.VSplitLeft(50.0f, nullptr, &FolderName);
 	FolderName.HMargin(2.0f, &FolderName);
 	pEditor->DoEditBox(&pNewFolderContext->m_NewFolderNameInput, &FolderName, 12.0f);
@@ -915,7 +916,7 @@ CUi::EPopupMenuFunctionResult CFileBrowser::CPopupConfirmDelete::Render(void *pC
 	ButtonBar.VSplitLeft(110.0f, &ButtonCancel, &ButtonBar);
 	ButtonBar.VSplitRight(110.0f, &ButtonBar, &ButtonDelete);
 
-	pFileBrowser->Ui()->DoLabel(&Label, "Confirm delete", 20.0f, TEXTALIGN_MC);
+	pFileBrowser->Ui()->DoLabel(&Label, EditorLocalize("Confirm delete"), 20.0f, TEXTALIGN_MC);
 
 	char aMessage[IO_MAX_PATH_LENGTH + 128];
 	str_format(aMessage, sizeof(aMessage), "Are you sure that you want to delete the %s '%s'?",
@@ -972,7 +973,7 @@ CUi::EPopupMenuFunctionResult CFileBrowser::CPopupConfirmOverwrite::Render(void 
 	ButtonBar.VSplitLeft(110.0f, &ButtonCancel, &ButtonBar);
 	ButtonBar.VSplitRight(110.0f, &ButtonBar, &ButtonOverride);
 
-	pFileBrowser->Ui()->DoLabel(&Label, "Confirm overwrite", 20.0f, TEXTALIGN_MC);
+	pFileBrowser->Ui()->DoLabel(&Label, EditorLocalize("Confirm overwrite"), 20.0f, TEXTALIGN_MC);
 
 	char aMessage[IO_MAX_PATH_LENGTH + 128];
 	str_format(aMessage, sizeof(aMessage), "The file '%s' already exists.\n\nAre you sure that you want to overwrite it?",

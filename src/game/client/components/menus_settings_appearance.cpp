@@ -836,6 +836,9 @@ void CMenus::RenderSettingsAppearance(CUIRect MainView)
 	{
 		MainView.VSplitMid(&LeftView, &RightView, MarginBetweenViews);
 
+		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_BcLaserBeautify, "BestClient laser beautification", &g_Config.m_BcLaserBeautify, &LeftView, LineSize);
+		LeftView.HSplitTop(MarginSmall, nullptr, &LeftView);
+
 		// ***** Weapons ***** //
 		Ui()->DoLabel_AutoLineSize(Localize("Weapons"), HeadlineFontSize,
 			TEXTALIGN_ML, &LeftView, HeadlineHeight);

@@ -117,6 +117,7 @@ bool CCommandProcessorFragment_OpenGL3_3::Cmd_Init(const SCommand_Init *pCommand
 	m_pPrimitiveExProgramRotationless = new CGLSLPrimitiveExProgram;
 	m_pPrimitiveExProgramTexturedRotationless = new CGLSLPrimitiveExProgram;
 	m_pSpriteProgramMultiple = new CGLSLSpriteMultipleProgram;
+	AllocateQmPrograms();
 	m_LastProgramId = 0;
 
 	CGLSLCompiler ShaderCompiler(g_Config.m_GfxGLMajor, g_Config.m_GfxGLMinor, g_Config.m_GfxGLPatch, m_IsOpenGLES, m_OpenGLTextureLodBIAS / 1000.0f);
@@ -469,6 +470,8 @@ bool CCommandProcessorFragment_OpenGL3_3::Cmd_Init(const SCommand_Init *pCommand
 	m_ClearColor.r = m_ClearColor.g = m_ClearColor.b = -1.f;
 
 	// fix the alignment to allow even 1byte changes, e.g. for alpha components
+	pCommand->m_pCapabilities->m_RenderTargets = true;
+	LoadQmPrograms(pCommand, ShaderCompiler, g_Config.m_GfxGLMajor, g_Config.m_GfxGLMinor, g_Config.m_GfxGLPatch);
 	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 
 	return true;
@@ -497,6 +500,16 @@ void CCommandProcessorFragment_OpenGL3_3::Cmd_Shutdown(const SCommand_Shutdown *
 	m_pPrimitiveExProgramTexturedRotationless->DeleteProgram();
 	m_pSpriteProgramMultiple->DeleteProgram();
 
+	UnloadQmPrograms();
+	FreeQmPrograms();
+	DestroyBackbufferCaptureResolveTarget();
+	for(size_t Index = 0; Index < m_vRenderTargets.size(); ++Index)
+	{
+		CCommandBuffer::SCommand_RenderTarget_Destroy Cmd;
+		Cmd.m_TargetId = Index;
+		Cmd_RenderTarget_Destroy(&Cmd);
+	}
+	m_vRenderTargets.clear();
 	// clean up everything
 	delete m_pPrimitiveProgram;
 	delete m_pPrimitiveProgramTextured;
@@ -697,7 +710,7 @@ void CCommandProcessorFragment_OpenGL3_3::TextureCreate(int Slot, int Width, int
 
 	// calculate memory usage
 	m_vTextures[Slot].m_MemSize = (size_t)Width * Height * PixelSize;
-	while(Width > 2 && Height > 2)
+	while((Flags & TextureFlag::NO_MIPMAPS) == 0 && Width > 2 && Height > 2)
 	{
 		Width >>= 1;
 		Height >>= 1;
@@ -711,6 +724,11 @@ void CCommandProcessorFragment_OpenGL3_3::TextureCreate(int Slot, int Width, int
 void CCommandProcessorFragment_OpenGL3_3::Cmd_Texture_Create(const CCommandBuffer::SCommand_Texture_Create *pCommand)
 {
 	TextureCreate(pCommand->m_Slot, pCommand->m_Width, pCommand->m_Height, GL_RGBA, GL_RGBA, pCommand->m_Flags, pCommand->m_pData);
+}
+
+void CCommandProcessorFragment_OpenGL3_3::Cmd_Texture_Update(const CCommandBuffer::SCommand_Texture_Update *pCommand)
+{
+	TextureUpdate(pCommand->m_Slot, 0, 0, pCommand->m_Width, pCommand->m_Height, GL_RGBA, pCommand->m_pData);
 }
 
 void CCommandProcessorFragment_OpenGL3_3::Cmd_TextTexture_Update(const CCommandBuffer::SCommand_TextTexture_Update *pCommand)

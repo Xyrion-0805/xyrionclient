@@ -12,6 +12,8 @@
 #include <engine/shared/json.h>
 #include <engine/storage.h>
 #include <engine/textrender.h>
+#include <engine/shared/config.h>
+#include <engine/client/text_gradient.h>
 
 // ft2 texture
 #include <ft2build.h>
@@ -289,7 +291,9 @@ public:
 
 class CGlyphMap
 {
+	uint64_t m_GlyphAtlasRevision = 1;
 public:
+	uint64_t GlyphAtlasRevision() const { return m_GlyphAtlasRevision; }
 	enum
 	{
 		FONT_TEXTURE_FILL = 0, // the main text body
@@ -340,8 +344,11 @@ private:
 	// Font faces
 	FT_Face m_DefaultFace = nullptr;
 	FT_Face m_IconFace = nullptr;
+	FT_Face m_QmIconFaces[4] = {};
+	EFontPreset m_FontPreset = EFontPreset::DEFAULT_FONT;
 	FT_Face m_VariantFace = nullptr;
 	FT_Face m_SelectedFace = nullptr;
+	FT_Face m_PreviewFace = nullptr;
 	std::vector<FT_Face> m_vFallbackFaces;
 	std::vector<FT_Face> m_vFtFaces;
 
@@ -432,7 +439,7 @@ private:
 		if(Chr == 0xe0073)
 			Chr = REPLACEMENT_CHARACTER;
 
-		for(FT_Face Face : {m_SelectedFace, m_DefaultFace, m_VariantFace})
+		for(FT_Face Face : {m_SelectedFace, m_PreviewFace, m_DefaultFace, m_VariantFace})
 		{
 			if(Face && Face->charmap)
 			{
@@ -649,10 +656,12 @@ public:
 	void AddFace(FT_Face Face)
 	{
 		m_vFtFaces.push_back(Face);
+		++m_GlyphAtlasRevision;
 	}
 
 	bool SetDefaultFaceByName(const char *pFamilyName)
 	{
+		++m_GlyphAtlasRevision;
 		m_DefaultFace = GetFaceByName(pFamilyName);
 		if(!m_DefaultFace)
 		{
@@ -710,8 +719,21 @@ public:
 		return true;
 	}
 
+	void SetQmIconFace(int Style, const char *pFamilyName)
+	{
+		m_QmIconFaces[Style] = GetFaceByName(pFamilyName);
+	}
+	void SetFontPreviewFace(const char *pFamilyName)
+	{
+		m_PreviewFace = GetFaceByName(pFamilyName);
+	}
+	bool HasFace(const char *pFamilyName)
+	{
+		return GetFaceByName(pFamilyName) != nullptr;
+	}
 	void SetFontPreset(EFontPreset FontPreset)
 	{
+		m_FontPreset = FontPreset;
 		switch(FontPreset)
 		{
 		case EFontPreset::DEFAULT_FONT:
@@ -720,11 +742,26 @@ public:
 		case EFontPreset::ICON_FONT:
 			m_SelectedFace = m_IconFace;
 			break;
+		case EFontPreset::QM_ICON_FONT:
+		{
+			const int Weight = g_Config.m_QmUiIconWeight;
+			const int Style = Weight == 0 ? 0 : Weight == 3 ? 3 : (Weight == 2 || Weight == 4) ? 2 : 1;
+			m_SelectedFace = m_QmIconFaces[Style];
+			break;
 		}
+		case EFontPreset::QM_ICON_FONT_FILL:
+			m_SelectedFace = m_QmIconFaces[3];
+			break;
+		}
+	}
+	EFontPreset GetFontPreset() const
+	{
+		return m_FontPreset;
 	}
 
 	void Clear()
 	{
+		++m_GlyphAtlasRevision;
 		for(size_t TextureIndex = 0; TextureIndex < NUM_FONT_TEXTURES; ++TextureIndex)
 		{
 			mem_zero(m_apTextureData[TextureIndex], m_TextureDimension * m_TextureDimension * sizeof(uint8_t));
@@ -919,6 +956,7 @@ struct STextContainer
 	bool m_HasCursor;
 	bool m_ForceCursorRendering;
 	bool m_HasSelection;
+	bool m_HasSpatialGradient;
 
 	bool m_SingleTimeUse;
 
@@ -944,6 +982,7 @@ struct STextContainer
 		m_HasCursor = false;
 		m_ForceCursorRendering = false;
 		m_HasSelection = false;
+		m_HasSpatialGradient = false;
 
 		m_SingleTimeUse = false;
 
@@ -962,16 +1001,9 @@ float CTextCursor::Height() const
 
 STextBoundingBox CTextCursor::BoundingBox() const
 {
-	return {m_StartX, m_StartY, m_LongestLineWidth, Height()};
+	return {m_StartX, m_StartY, m_LongestLineWidth, Height(), m_MaxCharacterHeight, m_LineCount};
 }
 
-void CTextCursor::SetPosition(vec2 Position)
-{
-	m_StartX = Position.x;
-	m_StartY = Position.y;
-	m_X = Position.x;
-	m_Y = Position.y;
-}
 
 struct SFontLanguageVariant
 {
@@ -1359,6 +1391,32 @@ public:
 			Success = false;
 		}
 
+		// Qm 原版 Phosphor 字体独立加载，避免覆盖现有图标。
+		const char *apStyles[] = {"Regular", "Bold", "Light", "Fill"};
+		for(int Style = 0; Style < 4; ++Style)
+		{
+			char aFontPath[128];
+			str_format(aFontPath, sizeof(aFontPath), "fonts/Phosphor/Phosphor-%s.ttf", apStyles[Style]);
+			void *pData = nullptr;
+			unsigned DataSize = 0;
+			if(Storage()->ReadFile(aFontPath, IStorage::TYPE_ALL, &pData, &DataSize))
+			{
+				if(LoadFontCollection(aFontPath, static_cast<FT_Byte *>(pData), (FT_Long)DataSize))
+				{
+					m_vpFontData.push_back(pData);
+					char aFamily[64];
+					str_format(aFamily, sizeof(aFamily), "Phosphor-%s", apStyles[Style]);
+					m_pGlyphMap->SetQmIconFace(Style, aFamily);
+				}
+				else
+				{
+					free(pData);
+					Success = false;
+				}
+			}
+			else
+				Success = false;
+		}
 		// extract default family name
 		const json_value &DefaultFace = (*pJsonData)["default"];
 		if(DefaultFace.type == json_string)
@@ -1451,6 +1509,29 @@ public:
 	{
 		m_pGlyphMap->SetFontPreset(FontPreset);
 	}
+	EFontPreset GetFontPreset() const override
+	{
+		return m_pGlyphMap->GetFontPreset();
+	}
+	uint64_t GlyphAtlasRevision() const override
+	{
+		return m_pGlyphMap != nullptr ? m_pGlyphMap->GlyphAtlasRevision() : 0;
+	}
+	void SetFontPreviewFace(const char *pFace) override
+	{
+		m_pGlyphMap->SetFontPreviewFace(pFace);
+	}
+	bool QmHasCustomFace(const char *pFace) override
+	{
+		return m_pGlyphMap->HasFace(pFace);
+	}
+	bool QmFontFamilyDefaultConfig(const char *pFamily, std::string &Config) override
+	{
+		if(!QmHasCustomFace(pFamily))
+			return false;
+		Config = pFamily;
+		return true;
+	}
 
 	void SetFontLanguageVariant(const char *pLanguageFile) override
 	{
@@ -1480,6 +1561,7 @@ public:
 		Cursor.m_FontSize = FontSize;
 		Cursor.m_Flags = Flags;
 		Cursor.m_LineWidth = LineWidth;
+		Cursor.m_CalculateVisualBoundingBox = TextSizeProps.m_pVisualTop != nullptr || TextSizeProps.m_pVisualBottom != nullptr;
 		TextEx(&Cursor, pText, StrLength);
 		if(TextSizeProps.m_pHeight != nullptr)
 			*TextSizeProps.m_pHeight = Cursor.Height();
@@ -1487,6 +1569,10 @@ public:
 			*TextSizeProps.m_pAlignedFontSize = Cursor.m_AlignedFontSize;
 		if(TextSizeProps.m_pMaxCharacterHeightInLine != nullptr)
 			*TextSizeProps.m_pMaxCharacterHeightInLine = Cursor.m_MaxCharacterHeight;
+		if(TextSizeProps.m_pVisualTop != nullptr)
+			*TextSizeProps.m_pVisualTop = Cursor.m_HasVisualBoundingBox ? Cursor.m_VisualTop - Cursor.m_StartY : 0.0f;
+		if(TextSizeProps.m_pVisualBottom != nullptr)
+			*TextSizeProps.m_pVisualBottom = Cursor.m_HasVisualBoundingBox ? Cursor.m_VisualBottom - Cursor.m_StartY : Cursor.Height();
 		if(TextSizeProps.m_pLineCount != nullptr)
 			*TextSizeProps.m_pLineCount = Cursor.m_LineCount;
 		return Cursor.m_LongestLineWidth;
@@ -1764,6 +1850,7 @@ public:
 		bool GotNewLineLast = false;
 
 		int ColorOption = 0;
+		int OffsetOption = 0;
 
 		while(pCurrent < pEnd && pCurrent != pEllipsis)
 		{
@@ -1930,14 +2017,44 @@ public:
 					const float TmpY = (DrawY + pCursor->m_AlignedFontSize);
 					const float CharX = (DrawX + CharKerning) + BearingX;
 					const float CharY = TmpY - BearingY;
+					if(pCursor->m_CalculateVisualBoundingBox && pGlyph->m_CharHeight > 0.0f)
+					{
+						const float FillLeftOffset = ((pGlyph->m_Width - pGlyph->m_CharWidth) * 0.5f) * Scale * pCursor->m_AlignedFontSize;
+						const float CharLeft = CharX + FillLeftOffset;
+						const float CharRight = CharLeft + pGlyph->m_CharWidth * Scale * pCursor->m_AlignedFontSize;
+						const float FillTopOffset = ((pGlyph->m_Height - pGlyph->m_CharHeight) * 0.5f) * Scale * pCursor->m_AlignedFontSize;
+						const float FillHeight = pGlyph->m_CharHeight * Scale * pCursor->m_AlignedFontSize;
+						const float CharTop = CharY - CharHeight + FillTopOffset;
+						const float CharBottom = CharTop + FillHeight;
+						if(!pCursor->m_HasVisualBoundingBox)
+						{
+							pCursor->m_HasVisualBoundingBox = true;
+							pCursor->m_VisualLeft = CharLeft;
+							pCursor->m_VisualRight = CharRight;
+							pCursor->m_VisualTop = CharTop;
+							pCursor->m_VisualBottom = CharBottom;
+						}
+						else
+						{
+							pCursor->m_VisualLeft = std::min(pCursor->m_VisualLeft, CharLeft);
+							pCursor->m_VisualRight = std::max(pCursor->m_VisualRight, CharRight);
+							pCursor->m_VisualTop = std::min(pCursor->m_VisualTop, CharTop);
+							pCursor->m_VisualBottom = std::max(pCursor->m_VisualBottom, CharBottom);
+						}
+					}
 
 					// Check if we have any color split
 					ColorRGBA Color = m_Color;
+					// QmClient：字符内横向渐变的右边缘色，未启用渐变时与 Color 相同。
+					ColorRGBA ColorEnd = m_Color;
 					if(ColorOption < (int)pCursor->m_vColorSplits.size())
 					{
 						STextColorSplit &Split = pCursor->m_vColorSplits.at(ColorOption);
 						if(PrevCharCount >= Split.m_CharIndex && (Split.m_Length == -1 || PrevCharCount < Split.m_CharIndex + Split.m_Length))
+						{
 							Color = Split.m_Color;
+							ColorEnd = Split.m_ColorEnd;
+						}
 						if(Split.m_Length != -1 && PrevCharCount >= (Split.m_CharIndex + Split.m_Length - 1))
 						{
 							ColorOption++;
@@ -1945,9 +2062,24 @@ public:
 							{ // Handle splits that are
 								Split = pCursor->m_vColorSplits.at(ColorOption);
 								if(PrevCharCount >= Split.m_CharIndex)
+								{
 									Color = Split.m_Color;
+									ColorEnd = Split.m_ColorEnd;
+								}
 							}
 						}
+					}
+
+					// QmClient：逐字符顶点变换。即使该字符不渲染也要消费游标，避免与字符错位。
+					const STextCharOffset *pCharOffset = nullptr;
+					// 跳过序号已经落后的条目：调用方可能为换行等不产生顶点的字符也建了条目，
+					// 若不跳过，游标会永久卡住，之后所有字符的偏移恒为 0。
+					while(OffsetOption < (int)pCursor->m_vCharOffsets.size() && pCursor->m_vCharOffsets.at(OffsetOption).m_CharIndex < PrevCharCount)
+						++OffsetOption;
+					if(OffsetOption < (int)pCursor->m_vCharOffsets.size() && pCursor->m_vCharOffsets.at(OffsetOption).m_CharIndex == PrevCharCount)
+					{
+						pCharOffset = &pCursor->m_vCharOffsets.at(OffsetOption);
+						++OffsetOption;
 					}
 
 					// don't add text that isn't drawn, the color overwrite is used for that
@@ -1969,19 +2101,19 @@ public:
 						TextCharQuad.m_aVertices[1].m_Y = CharY;
 						TextCharQuad.m_aVertices[1].m_U = pGlyph->m_aUVs[2];
 						TextCharQuad.m_aVertices[1].m_V = pGlyph->m_aUVs[3];
-						TextCharQuad.m_aVertices[1].m_Color.r = (unsigned char)(Color.r * 255.f);
-						TextCharQuad.m_aVertices[1].m_Color.g = (unsigned char)(Color.g * 255.f);
-						TextCharQuad.m_aVertices[1].m_Color.b = (unsigned char)(Color.b * 255.f);
-						TextCharQuad.m_aVertices[1].m_Color.a = (unsigned char)(Color.a * 255.f);
+						TextCharQuad.m_aVertices[1].m_Color.r = (unsigned char)(ColorEnd.r * 255.f);
+						TextCharQuad.m_aVertices[1].m_Color.g = (unsigned char)(ColorEnd.g * 255.f);
+						TextCharQuad.m_aVertices[1].m_Color.b = (unsigned char)(ColorEnd.b * 255.f);
+						TextCharQuad.m_aVertices[1].m_Color.a = (unsigned char)(ColorEnd.a * 255.f);
 
 						TextCharQuad.m_aVertices[2].m_X = CharX + CharWidth;
 						TextCharQuad.m_aVertices[2].m_Y = CharY - CharHeight;
 						TextCharQuad.m_aVertices[2].m_U = pGlyph->m_aUVs[2];
 						TextCharQuad.m_aVertices[2].m_V = pGlyph->m_aUVs[1];
-						TextCharQuad.m_aVertices[2].m_Color.r = (unsigned char)(Color.r * 255.f);
-						TextCharQuad.m_aVertices[2].m_Color.g = (unsigned char)(Color.g * 255.f);
-						TextCharQuad.m_aVertices[2].m_Color.b = (unsigned char)(Color.b * 255.f);
-						TextCharQuad.m_aVertices[2].m_Color.a = (unsigned char)(Color.a * 255.f);
+						TextCharQuad.m_aVertices[2].m_Color.r = (unsigned char)(ColorEnd.r * 255.f);
+						TextCharQuad.m_aVertices[2].m_Color.g = (unsigned char)(ColorEnd.g * 255.f);
+						TextCharQuad.m_aVertices[2].m_Color.b = (unsigned char)(ColorEnd.b * 255.f);
+						TextCharQuad.m_aVertices[2].m_Color.a = (unsigned char)(ColorEnd.a * 255.f);
 
 						TextCharQuad.m_aVertices[3].m_X = CharX;
 						TextCharQuad.m_aVertices[3].m_Y = CharY - CharHeight;
@@ -1991,6 +2123,52 @@ public:
 						TextCharQuad.m_aVertices[3].m_Color.g = (unsigned char)(Color.g * 255.f);
 						TextCharQuad.m_aVertices[3].m_Color.b = (unsigned char)(Color.b * 255.f);
 						TextCharQuad.m_aVertices[3].m_Color.a = (unsigned char)(Color.a * 255.f);
+
+						if(pCharOffset != nullptr)
+						{
+							// 围绕字形中心缩放；排版、选区和光标继续使用原字形尺寸。
+							const vec2 Center(CharX + CharWidth * 0.5f, CharY - CharHeight * 0.5f);
+							for(auto &Vertex : TextCharQuad.m_aVertices)
+							{
+								const vec2 Position = pCharOffset->TransformVertex(vec2(Vertex.m_X, Vertex.m_Y), Center);
+								Vertex.m_X = Position.x;
+								Vertex.m_Y = Position.y;
+							}
+						}
+
+						if(pCursor->m_pfnColorSampler != nullptr)
+						{
+							TextContainer.m_HasSpatialGradient = true;
+							const STextCharQuad Glyph = TextCharQuad;
+							bool First = true;
+							ForEachTextGradientCell(vec2(Glyph.m_aVertices[3].m_X, Glyph.m_aVertices[3].m_Y),
+								vec2(Glyph.m_aVertices[1].m_X, Glyph.m_aVertices[1].m_Y),
+								vec2(Glyph.m_aVertices[3].m_U, Glyph.m_aVertices[3].m_V),
+								vec2(Glyph.m_aVertices[1].m_U, Glyph.m_aVertices[1].m_V),
+								pCursor->m_pfnColorSampler, pCursor->m_pColorSamplerContext, pCursor->m_ColorSamplerColumns, pCursor->m_ColorSamplerRows, [&](const STextGradientCell &Cell) {
+									if(!First)
+									{
+										TextContainer.m_StringInfo.m_vCharacterQuads.emplace_back();
+									}
+									First = false;
+									auto &Quad = TextContainer.m_StringInfo.m_vCharacterQuads.back();
+									const int aCornerIndices[] = {2, 3, 1, 0};
+									for(int i = 0; i < 4; ++i)
+									{
+										const int Corner = aCornerIndices[i];
+										auto &Vertex = Quad.m_aVertices[i];
+										Vertex.m_X = Cell.m_aPositions[Corner].x;
+										Vertex.m_Y = Cell.m_aPositions[Corner].y;
+										Vertex.m_U = Cell.m_aUvs[Corner].x;
+										Vertex.m_V = Cell.m_aUvs[Corner].y;
+										const auto &Sample = Cell.m_aColors[Corner];
+										Vertex.m_Color.r = static_cast<unsigned char>(std::clamp(Sample.r, 0.0f, 1.0f) * 255.0f);
+										Vertex.m_Color.g = static_cast<unsigned char>(std::clamp(Sample.g, 0.0f, 1.0f) * 255.0f);
+										Vertex.m_Color.b = static_cast<unsigned char>(std::clamp(Sample.b, 0.0f, 1.0f) * 255.0f);
+										Vertex.m_Color.a = static_cast<unsigned char>(std::clamp(Sample.a, 0.0f, 1.0f) * 255.0f);
+									}
+								});
+						}
 					}
 
 					// calculate the full width from the last selection point to the end of this selection draw on screen
@@ -2043,6 +2221,7 @@ public:
 							aCursorQuads[0] = IGraphics::CQuadItem(SelX - CursorOuterInnerDiff, DrawY, CursorOuterWidth, pCursor->m_AlignedFontSize);
 							aCursorQuads[1] = IGraphics::CQuadItem(SelX, DrawY + CursorOuterInnerDiff, CursorInnerWidth, pCursor->m_AlignedFontSize - CursorOuterInnerDiff * 2);
 							pCursor->m_CursorRenderedPosition = vec2(SelX, DrawY);
+							pCursor->m_HasCursorRenderedPosition = true;
 						}
 					}
 
@@ -2055,7 +2234,7 @@ public:
 
 					pCursor->m_GlyphCount++;
 
-					if(SelectionStarted && IsRendered)
+					if(SelectionStarted)
 					{
 						if(!vSelectionQuads.empty() && SelectionQuadLine == LineCount)
 						{
@@ -2151,35 +2330,40 @@ public:
 				aCursorQuads[0] = IGraphics::CQuadItem((LastSelX + LastSelWidth) - CursorOuterInnerDiff, DrawY, CursorOuterWidth, pCursor->m_AlignedFontSize);
 				aCursorQuads[1] = IGraphics::CQuadItem((LastSelX + LastSelWidth), DrawY + CursorOuterInnerDiff, CursorInnerWidth, pCursor->m_AlignedFontSize - CursorOuterInnerDiff * 2);
 				pCursor->m_CursorRenderedPosition = vec2(LastSelX + LastSelWidth, DrawY);
+							pCursor->m_HasCursorRenderedPosition = true;
 			}
 		}
 
 		const bool HasSelection = !vSelectionQuads.empty() && SelectionUsedPress && SelectionUsedRelease;
-		if((HasSelection || HasCursor) && IsRendered)
+		const bool HasRenderedCursor = HasCursor && pCursor->m_RenderCursor;
+		const bool HasRenderedSelection = HasSelection && pCursor->m_RenderSelection;
+		if((HasRenderedSelection || HasRenderedCursor) && IsRendered)
 		{
 			Graphics()->SetColor(1.f, 1.f, 1.f, 1.f);
 			if(TextContainer.m_StringInfo.m_SelectionQuadContainerIndex == -1)
 				TextContainer.m_StringInfo.m_SelectionQuadContainerIndex = Graphics()->CreateQuadContainer(false);
-			if(HasCursor)
+			if(HasRenderedCursor)
 				Graphics()->QuadContainerAddQuads(TextContainer.m_StringInfo.m_SelectionQuadContainerIndex, aCursorQuads, std::size(aCursorQuads));
-			if(HasSelection)
+			if(HasRenderedSelection)
 				Graphics()->QuadContainerAddQuads(TextContainer.m_StringInfo.m_SelectionQuadContainerIndex, vSelectionQuads.data(), vSelectionQuads.size());
 			Graphics()->QuadContainerUpload(TextContainer.m_StringInfo.m_SelectionQuadContainerIndex);
 
-			TextContainer.m_HasCursor = HasCursor;
-			TextContainer.m_HasSelection = HasSelection;
+			TextContainer.m_HasCursor = HasRenderedCursor;
+			TextContainer.m_HasSelection = HasRenderedSelection;
 			TextContainer.m_ForceCursorRendering = pCursor->m_ForceCursorRendering;
+		}
 
-			if(HasSelection)
-			{
-				pCursor->m_SelectionStart = SelectionStartChar;
-				pCursor->m_SelectionEnd = SelectionEndChar;
-			}
-			else
-			{
-				pCursor->m_SelectionStart = -1;
-				pCursor->m_SelectionEnd = -1;
-			}
+		if(HasSelection)
+		{
+			pCursor->m_SelectionStart = SelectionStartChar;
+			pCursor->m_SelectionEnd = SelectionEndChar;
+			if(!pCursor->m_RenderSelection)
+				pCursor->m_vSelectionQuads = std::move(vSelectionQuads);
+		}
+		else
+		{
+			pCursor->m_SelectionStart = -1;
+			pCursor->m_SelectionEnd = -1;
 		}
 
 		// even if no text is drawn the cursor position will be adjusted
@@ -2212,8 +2396,14 @@ public:
 
 	void RecreateTextContainerSoft(STextContainerIndex &TextContainerIndex, CTextCursor *pCursor, const char *pText, int Length = -1) override
 	{
+		if(!TextContainerIndex.Valid())
+		{
+			RecreateTextContainer(TextContainerIndex, pCursor, pText, Length);
+			return;
+		}
 		STextContainer &TextContainer = GetTextContainer(TextContainerIndex);
 		TextContainer.m_StringInfo.m_vCharacterQuads.clear();
+		TextContainer.m_HasSpatialGradient = false;
 		TextContainer.m_aDebugText[0] = '\0';
 		// the text buffer gets then recreated by the appended quads
 		AppendTextContainer(TextContainerIndex, pCursor, pText, Length);
@@ -2258,6 +2448,39 @@ public:
 				Graphics()->TextureClear();
 				// render buffered text
 				Graphics()->RenderText(TextContainer.m_StringInfo.m_QuadBufferContainerIndex, TextContainer.m_StringInfo.m_vCharacterQuads.size(), m_pGlyphMap->TextureDimension(), m_pGlyphMap->Texture(CGlyphMap::FONT_TEXTURE_FILL).Id(), m_pGlyphMap->Texture(CGlyphMap::FONT_TEXTURE_OUTLINE).Id(), TextColor, TextOutlineColor);
+			}
+			else if(TextContainer.m_HasSpatialGradient)
+			{
+				// 无文字缓冲后端也保留每个顶点的颜色，避免中心和纵向渐变退化为色块。
+				const float UVScale = 1.0f / m_pGlyphMap->TextureDimension();
+				const auto DrawPass = [&](size_t TextureIndex, const ColorRGBA &Tint) {
+					if(Tint.a <= 0.0f)
+						return;
+					Graphics()->TextureSet(m_pGlyphMap->Texture(TextureIndex));
+					Graphics()->QuadsBegin();
+					for(const auto &Quad : TextContainer.m_StringInfo.m_vCharacterQuads)
+					{
+						const auto &aVertices = Quad.m_aVertices;
+						const int aCorners[] = {0, 1, 3, 2};
+						IGraphics::CColorVertex aColors[4];
+						for(int i = 0; i < 4; ++i)
+						{
+							const auto &Color = aVertices[aCorners[i]].m_Color;
+							aColors[i] = {i, ColorRGBA(Color.r / 255.0f * Tint.r, Color.g / 255.0f * Tint.g, Color.b / 255.0f * Tint.b, Color.a / 255.0f * Tint.a)};
+						}
+						Graphics()->SetColorVertex(aColors, std::size(aColors));
+						Graphics()->QuadsSetSubsetFree(aVertices[0].m_U * UVScale, aVertices[0].m_V * UVScale, aVertices[1].m_U * UVScale, aVertices[1].m_V * UVScale,
+							aVertices[3].m_U * UVScale, aVertices[3].m_V * UVScale, aVertices[2].m_U * UVScale, aVertices[2].m_V * UVScale);
+						const IGraphics::CFreeformItem Item(vec2(aVertices[0].m_X, aVertices[0].m_Y), vec2(aVertices[1].m_X, aVertices[1].m_Y),
+							vec2(aVertices[3].m_X, aVertices[3].m_Y), vec2(aVertices[2].m_X, aVertices[2].m_Y));
+						Graphics()->QuadsDrawFreeform(&Item, 1);
+					}
+					Graphics()->QuadsEnd();
+				};
+				Graphics()->FlushVertices();
+				DrawPass(CGlyphMap::FONT_TEXTURE_OUTLINE, TextOutlineColor);
+				DrawPass(CGlyphMap::FONT_TEXTURE_FILL, TextColor);
+				Graphics()->SetColor(1.0f, 1.0f, 1.0f, 1.0f);
 			}
 			else
 			{

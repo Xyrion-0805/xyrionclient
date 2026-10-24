@@ -1,0 +1,668 @@
+# Xyrion map editor: independent Chinese UI, without changing map data.
+File
+== 文件
+Layers
+== 图层
+Images
+== 图片
+Sounds
+== 声音
+Envelopes
+== 包络动画
+Server settings
+== 服务器设置
+History
+== 操作历史
+Tools
+== 工具
+Settings
+== 设置
+New
+== 新建
+New map
+== 新建地图
+Load
+== 打开
+Load map
+== 打开地图
+Load current map
+== 打开当前地图
+Load ingame map
+== 打开游戏中的地图
+Append
+== 合并地图
+Append map
+== 合并地图
+Save
+== 保存
+Save as
+== 另存为
+Save copy
+== 保存副本
+Save copy as
+== 保存副本为
+Exit
+== 退出
+Map details
+== 地图信息
+Test map locally
+== 本地测试地图
+Show help
+== 帮助
+Help
+== 帮助
+Cancel
+== 取消
+Confirm
+== 确认
+Close
+== 关闭
+Open
+== 打开
+Delete
+== 删除
+Remove
+== 移除
+Rename
+== 重命名
+Replace
+== 替换
+Refresh
+== 刷新
+Create
+== 创建
+Copy
+== 复制
+Paste
+== 粘贴
+Cut
+== 剪切
+Undo
+== 撤销
+Redo
+== 重做
+Reset
+== 重置
+Yes
+== 是
+No
+== 否
+None
+== 无
+Off
+== 关闭
+On
+== 开启
+Add group
+== 添加组
+Add tile layer
+== 添加图块层
+Add tiles layer
+== 添加图块层
+Add quads layer
+== 添加四边形层
+Add sound layer
+== 添加声音层
+Add front layer
+== 添加前景层
+Add tele layer
+== 添加传送层
+Add speedup layer
+== 添加加速层
+Add switch layer
+== 添加开关层
+Add tune layer
+== 添加调参层
+Add image
+== 添加图片
+Add sound
+== 添加声音
+Add quad
+== 添加四边形
+Add sound source
+== 添加声源
+Delete group
+== 删除组
+Delete layer
+== 删除图层
+Group
+== 组
+Layer
+== 图层
+Name
+== 名称
+Name:
+== 名称：
+Width
+== 宽度
+Height
+== 高度
+Detail
+== 细节层
+Image
+== 图片
+Sound
+== 声音
+Color
+== 颜色
+Color Env
+== 颜色包络
+Color Env Offset
+== 颜色包络偏移
+Pos Env
+== 位置包络
+Pos Env Offset
+== 位置包络偏移
+Position Env
+== 位置包络
+Position Env Offset
+== 位置包络偏移
+Offset X
+== X 偏移
+Offset Y
+== Y 偏移
+Parallax X
+== X 视差
+Parallax Y
+== Y 视差
+Use Clipping
+== 启用裁剪
+Clip X
+== 裁剪 X
+Clip Y
+== 裁剪 Y
+Clip W
+== 裁剪宽度
+Clip H
+== 裁剪高度
+Order
+== 顺序
+Game
+== 游戏层
+Tiles
+== 图块
+Quads
+== 四边形
+Sound sources
+== 声源
+Embedded
+== 已嵌入
+External
+== 外部资源
+Embed
+== 嵌入
+Make external
+== 转为外部
+Unused
+== 未使用
+Properties
+== 属性
+Brush picker
+== 笔刷选择
+Toggle grid
+== 切换网格
+Grid
+== 网格
+Grid size
+== 网格大小
+Zoom out
+== 缩小
+Zoom in
+== 放大
+Reset zoom
+== 重置缩放
+Refocus
+== 回到中心
+Proof
+== 画面预览
+Proof borders
+== 画面边界
+Animate
+== 动画播放
+Animation
+== 动画
+Destructive
+== 覆盖绘制
+Info
+== 信息
+Hex
+== 十六进制
+New folder
+== 新建文件夹
+Show directory
+== 打开目录
+Create new folder
+== 新建文件夹
+Confirm delete
+== 确认删除
+Confirm overwrite
+== 确认覆盖
+Overwrite
+== 覆盖
+Filename:
+== 文件名：
+Search:
+== 搜索：
+Current path: %s
+== 当前路径：%s
+Time modified %s
+== 修改时间 %s
+Filename %s
+== 文件名 %s
+All combined
+== 所有目录
+Author:
+== 作者：
+Version:
+== 版本：
+Credits:
+== 致谢：
+License:
+== 许可：
+Author
+== 作者
+Version
+== 版本
+Credits
+== 致谢
+License
+== 许可
+Saving...
+== 正在保存…
+Saving…
+== 正在保存…
+Saved
+== 已保存
+Speed
+== 速度
+Angle
+== 角度
+Force
+== 力度
+Max Speed
+== 最大速度
+Number
+== 编号
+Delay
+== 延迟
+Value
+== 数值
+Type
+== 类型
+Volume
+== 音量
+Pan
+== 声像
+Loop
+== 循环
+Falloff
+== 衰减
+Shape
+== 形状
+Radius
+== 半径
+Falloff distance
+== 衰减距离
+Sound Env
+== 声音包络
+Sound Env Offset
+== 声音包络偏移
+Position
+== 位置
+Rotation
+== 旋转
+Synchronization
+== 同步
+Synchronized
+== 同步
+Sync
+== 同步
+Time
+== 时间
+Points
+== 控制点
+Delete point
+== 删除控制点
+Add point
+== 添加控制点
+New envelope
+== 新建包络
+Delete envelope
+== 删除包络
+Color envelope
+== 颜色包络
+Position envelope
+== 位置包络
+Sound envelope
+== 声音包络
+Linear
+== 线性
+Smooth
+== 平滑
+Slow
+== 慢速
+Fast
+== 快速
+Step
+== 阶跃
+Bezier
+== 贝塞尔
+Game tiles: Air
+== 游戏图块: 空气
+Game tiles: Hookable
+== 游戏图块: 可钩
+Game tiles: Unhookable
+== 游戏图块: 不可钩
+Game tiles: Death
+== 游戏图块: 死亡
+Game tiles: Freeze
+== 游戏图块: 冻结
+Game tiles: Unfreeze
+== 游戏图块: 解冻
+Game tiles: Deep Freeze
+== 游戏图块: 深度冻结
+Game tiles: Deep Unfreeze
+== 游戏图块: 深度解冻
+Game tiles: Blue Check Tele
+== 游戏图块: 蓝色检查点传送
+Game tiles: Red Check Tele
+== 游戏图块: 红色检查点传送
+Game tiles: Live Freeze
+== 游戏图块: 活冻结
+Game tiles: Live Unfreeze
+== 游戏图块: 活解冻
+Air
+== 空气
+Hookable
+== 可钩
+Unhookable
+== 不可钩
+Death
+== 死亡
+Freeze
+== 冻结
+Unfreeze
+== 解冻
+Deep Freeze
+== 深度冻结
+Deep Unfreeze
+== 深度解冻
+Automapper
+== 自动铺图
+Auto map
+== 自动铺图
+AutoMapper
+== 自动铺图
+Seed
+== 随机种子
+Run
+== 执行
+Configuration
+== 配置
+Config
+== 配置
+Square
+== 正方形
+Circle
+== 圆形
+Rectangle
+== 矩形
+Border
+== 边框
+Size
+== 大小
+Size: %d × %d
+== 大小：%d × %d
+Select
+== 选择
+Select all
+== 全选
+Clear
+== 清空
+Load a new sound to use in the map.
+== 加载用于地图的新声音。
+Add a new group.
+== 添加新的图层组。
+Construct game tiles from this layer.
+== 根据此图层生成游戏碰撞图块。
+Expand or collapse all groups.
+== 展开或折叠所有组。
+Use left mouse button to drag and change the value. Hold shift to be more precise. Right click to edit as text.
+== 左键拖动调整数值，按住 Shift 精细调整，右键直接输入。
+Decrease value.
+== 减小数值。
+Increase value.
+== 增大数值。
+Change the grid settings.
+== 修改网格设置。
+[]
+[Ctrl+Z] Undo the last action.
+== [Ctrl+Z] 撤销上一次操作。
+[]
+[Ctrl+Y] Redo the last action.
+== [Ctrl+Y] 重做上一次操作。
+[]
+[N] Flip the brush horizontally.
+== [N] 水平翻转笔刷。
+[]
+[M] Flip the brush vertically.
+== [M] 垂直翻转笔刷。
+[]
+[R] Rotate the brush counter-clockwise.
+== [R] 逆时针旋转笔刷。
+[]
+[T] Rotate the brush clockwise.
+== [T] 顺时针旋转笔刷。
+[]
+[Ctrl+D] Toggle brush draw mode: preserve or override existing tiles.
+== [Ctrl+D] 切换笔刷绘制模式：保留或覆盖已有图块。
+[]
+[Escape] Exit from the editor.
+== [Escape] 退出地图编辑器。
+[]
+[Ctrl+Space, Hold Space] Toggle brush picker.
+== [Ctrl+Space，按住 Space] 切换笔刷选择器。
+[]
+[Ctrl+G] Toggle grid.
+== [Ctrl+G] 切换网格显示。
+[]
+[F1] Open the DDNet Wiki page for the map editor in a web browser.
+== [F1] 在浏览器中打开地图编辑器的 DDNet Wiki 帮助。
+Left click to toggle visibility. Right click to show this group only.
+== 左键切换可见性，右键只显示此组。
+Left click to toggle visibility. Right click to show only this layer within its group.
+== 左键切换可见性，右键只显示组内此图层。
+Sort by time modified.
+== 按修改时间排序。
+Sort by filename.
+== 按文件名排序。
+Open the selected folder.
+== 打开选中的文件夹。
+Open the selected file.
+== 打开选中的文件。
+Save file with the specified name.
+== 以指定名称保存文件。
+Close this dialog.
+== 关闭此对话框。
+Refresh the list of files.
+== 刷新文件列表。
+Open the current directory in the file browser.
+== 在文件管理器中打开当前目录。
+Delete the selected folder.
+== 删除选中的文件夹。
+Delete the selected file.
+== 删除选中的文件。
+Create a new folder.
+== 创建新文件夹。
+This name cannot be used for files and folders.
+== 此名称不能用于文件或文件夹。
+Left click to pick a color from the screen. Right click to cancel pipette mode.
+== 左键从屏幕取色，右键取消取色。
+Close the selected map.
+== 关闭选中的地图。
+Close the selected map. This map has unsaved changes.
+== 关闭选中的地图。此地图有未保存的改动。
+
+Color:
+== 颜色：
+Value:
+== 数值：
+Time (in s):
+== 时间（秒）：
+Loaded map
+== 已打开地图
+Editor history. Click on an action to undo all actions above.
+== 编辑历史。点击某项操作可撤销其后的所有操作。
+Map settings error
+== 地图设置错误
+Below is a report of the invalid map settings found when loading the map. Please fix them before proceeding further.
+== 以下是在加载地图时发现的无效设置，请修复后继续。
+Failed to load the image (check the local console for details).
+== 无法加载图片，请在本地控制台查看详情。
+Failed to load the sound (check the local console for details). Make sure you enabled sounds in the settings.
+== 无法加载声音，请在设置中启用声音，并在本地控制台查看详情。
+Brush coloring
+== 笔刷着色
+Allow unused
+== 允许未使用图块
+Show info
+== 显示图块信息
+Preview quad envelopes
+== 预览四边形包络
+Align quads
+== 对齐四边形
+Show quads bounds
+== 显示四边形边界
+Auto map reload
+== 自动重载地图
+Select layers by tile
+== 按图块选择图层
+Show ingame entities
+== 显示游戏实体
+Configure quad art
+== 配置四边形图案
+Editing multiple layers
+== 正在编辑多个图层
+Shift
+== 平移
+Shift by
+== 平移量
+Color TO
+== 颜色时间偏移
+Auto Rule
+== 自动铺图规则
+Reference
+== 参考图层
+Live Gametiles
+== 实时游戏图块
+Game tiles: Hookthrough
+== 游戏图块: 钩子穿透
+Goto position
+== 跳转坐标
+Layer: add image
+== 图层: 添加图片
+Show info: Off
+== 图块信息: 关闭
+Show info: Dec
+== 图块信息: 十进制
+Show info: Hex
+== 图块信息: 十六进制
+Pipette
+== 取色器
+Close map
+== 关闭地图
+Save map
+== 保存地图
+%s Right click for context menu.
+== %s 右键打开快捷菜单。
+Go to a specified coordinate point on the map.
+== 跳转到地图上的指定坐标。
+Toggle proof borders. These borders represent the area that a player can see with default zoom.
+== 切换预览边界，表示默认缩放下玩家能看到的范围。
+Create a new tile layer.
+== 创建图块层。
+Create a new switch layer.
+== 创建开关层。
+Create a new tuning layer.
+== 创建调参层。
+Create a new speedup layer.
+== 创建加速层。
+Create a new tele layer.
+== 创建传送层。
+Create a new item layer.
+== 创建前景图层。
+Create a new quads layer.
+== 创建四边形层。
+Create a new sound layer.
+== 创建声音层。
+Toggle the envelope editor.
+== 切换包络编辑器。
+Toggle the server settings editor.
+== 切换服务器设置编辑器。
+Toggle the editor history view.
+== 切换编辑历史。
+Load a new image to use in the map.
+== 加载用于地图的新图片。
+Pick mapres image for currently selected layer.
+== 为当前图层选择 mapres 图片。
+Do not show tile information.
+== 隐藏图块信息。
+Toggle previewing the paths of quads with a position envelope when a quad layer is selected.
+== 选中四边形层时，预览其位置包络的动画路径。
+Delete the layer.
+== 删除此图层。
+Adjust the map details of the current map.
+== 修改当前地图信息。
+Run a local server with the current map and connect you to it.
+== 使用当前地图启动本地服务器并连接。
+[]
+[Numpad*] Zoom to normal and remove editor offset.
+== [数字键盘 *] 恢复正常缩放并清除偏移。
+[]
+[Numpad-] Zoom out.
+== [数字键盘 -] 缩小。
+[]
+[Numpad+] Zoom in.
+== [数字键盘 +] 放大。
+[]
+[Home] Restore map focus.
+== [Home] 恢复地图中心。
+[]
+[Ctrl+N] Create a new map.
+== [Ctrl+N] 新建地图。
+[]
+[Ctrl+S] Save the current map.
+== [Ctrl+S] 保存当前地图。
+[]
+[Ctrl+Shift+S] Save the current map under a new name.
+== [Ctrl+Shift+S] 将当前地图另存为新名称。
+[]
+[Ctrl+Shift+Alt+S] Save a copy of the current map under a new name.
+== [Ctrl+Shift+Alt+S] 另存一份地图副本。
+[]
+[Ctrl+L] Open a map for editing.
+== [Ctrl+L] 打开地图进行编辑。
+[]
+[Ctrl+Shift+L] Open the current ingame map for editing.
+== [Ctrl+Shift+L] 打开游戏中的地图进行编辑。
+[]
+[Ctrl+A] Open a map and add everything from that map to the current map.
+== [Ctrl+A] 打开地图并将其内容合并到当前地图。
+[]
+[Ctrl+F4] Close the current map.
+== [Ctrl+F4] 关闭当前地图。
+[]
+[Ctrl+I] Show tile information.
+== [Ctrl+I] 显示图块信息。
+[]
+[Ctrl+Shift+I] Show tile information in hexadecimal.
+== [Ctrl+Shift+I] 以十六进制显示图块信息。
+[]
+[Ctrl+Shift+C] Color pipette. Pick a color from the screen by clicking on it.
+== [Ctrl+Shift+C] 启用取色器，点击屏幕取色。
+[]
+[Ctrl+Q] Add a new quad.
+== [Ctrl+Q] 添加四边形。
+[]
+[Ctrl+Q] Add a new sound source.
+== [Ctrl+Q] 添加声源。

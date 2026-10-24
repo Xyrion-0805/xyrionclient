@@ -9,6 +9,7 @@
 #include <game/client/component.h>
 
 #include <deque>
+#include <game/client/components/qmclient/gores_drown_tracker.h>
 
 class CTClient : public CComponent
 {
@@ -43,6 +44,14 @@ class CTClient : public CComponent
 
 public:
 	CTClient();
+	CQmGoresDrownTracker m_GoresDrownTracker;
+	char m_aGoresDrownMap[128] = {};
+	bool m_GoresDrownModeActive = false;
+	void ResetGoresDrownCounts();
+	void UpdateGoresDrownCounts();
+	bool IsGoresDrownBoardMode() const;
+	bool IsGoresGameMode() const;
+	int GetGoresDrownCount(int ClientId) const { return m_GoresDrownTracker.Count(ClientId); }
 	int Sizeof() const override { return sizeof(*this); }
 	void OnInit() override;
 	void OnMessage(int MsgType, void *pRawMsg) override;

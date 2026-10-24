@@ -3,6 +3,7 @@
 #include "render.h"
 
 #include "animstate.h"
+#include "components/tclient/tee_accessories.h"
 
 #include <base/math.h>
 #include <base/str.h>
@@ -263,6 +264,7 @@ void CRenderTools::RenderTee(const CAnimState *pAnim, const CTeeRenderInfo *pInf
 	else
 		RenderTee6(pAnim, pInfo, Emote, Dir, Pos, Alpha, IsLocal);
 
+	if(IsLocal) RenderTeeAccessories(Graphics(), pAnim, pInfo, Dir, Pos, Alpha);
 	Graphics()->SetColor(1.f, 1.f, 1.f, 1.f);
 	Graphics()->QuadsSetRotation(0);
 }

@@ -802,6 +802,7 @@ void CMenus::OnInterfacesInit(CGameClient *pClient)
 	m_MenusSettingsControls.OnInterfacesInit(pClient);
 	m_MenusStart.OnInterfacesInit(pClient);
 	m_CommunityIcons.OnInterfacesInit(pClient);
+	m_ServerMapPreview.OnInterfacesInit(pClient);
 }
 
 void CMenus::OnInit()
@@ -852,6 +853,14 @@ void CMenus::OnInit()
 	Console()->Chain("cl_asset_particles", ConchainAssetParticles, this);
 	Console()->Chain("cl_asset_hud", ConchainAssetHud, this);
 	Console()->Chain("cl_asset_extras", ConchainAssetExtras, this);
+	Console()->Chain("cl_asset_cursor", [](IConsole::IResult *pResult, void *pUser, IConsole::FCommandCallback pCallback, void *pCallbackUser) {
+		pCallback(pResult, pCallbackUser);
+		if(pResult->NumArguments()) static_cast<CMenus *>(pUser)->GameClient()->LoadCursorAsset(g_Config.m_ClAssetCursor);
+	}, this);
+	Console()->Chain("cl_asset_arrow", [](IConsole::IResult *pResult, void *pUser, IConsole::FCommandCallback pCallback, void *pCallbackUser) {
+		pCallback(pResult, pCallbackUser);
+		if(pResult->NumArguments()) static_cast<CMenus *>(pUser)->GameClient()->LoadArrowAsset(g_Config.m_ClAssetArrow);
+	}, this);
 
 	Console()->Chain("demo_play", ConchainDemoPlay, this);
 	Console()->Chain("demo_speed", ConchainDemoSpeed, this);
@@ -2302,12 +2311,14 @@ void CMenus::SetActive(bool Active)
 
 void CMenus::OnShutdown()
 {
+	AssetsEditorCloseNow();
+	m_ServerMapPreview.Shutdown();
 	m_CommunityIcons.Shutdown();
 }
 
 bool CMenus::OnCursorMove(float x, float y, IInput::ECursorType CursorType)
 {
-	if(!m_MenuActive)
+	if(!m_MenuActive && !GameClient()->m_AspectRatio.ConfirmWantsInput())
 		return false;
 
 	Ui()->ConvertMouseMove(&x, &y, CursorType);
@@ -2319,7 +2330,7 @@ bool CMenus::OnCursorMove(float x, float y, IInput::ECursorType CursorType)
 bool CMenus::OnInput(const IInput::CEvent &Event)
 {
 	// Escape key is always handled to activate/deactivate menu
-	if((Event.m_Flags & IInput::FLAG_PRESS && Event.m_Key == KEY_ESCAPE) || IsActive())
+	if((Event.m_Flags & IInput::FLAG_PRESS && Event.m_Key == KEY_ESCAPE) || IsActive() || GameClient()->m_AspectRatio.ConfirmWantsInput())
 	{
 		Ui()->OnInput(Event);
 		return true;
@@ -2377,6 +2388,8 @@ void CMenus::OnWindowResize()
 
 void CMenus::OnRender()
 {
+	auto &Aspect = GameClient()->m_AspectRatio;
+	Aspect.UpdateConfirm();
 	if(Client()->State() != IClient::STATE_ONLINE && Client()->State() != IClient::STATE_DEMOPLAYBACK)
 		SetActive(true);
 
@@ -2393,27 +2406,28 @@ void CMenus::OnRender()
 		{
 			SetActive(true);
 		}
-		else if(Client()->State() != IClient::STATE_DEMOPLAYBACK)
+		else if(Client()->State() != IClient::STATE_DEMOPLAYBACK && !Aspect.ShowConfirmOverlay())
 		{
 			Ui()->ClearHotkeys();
 			return;
 		}
 	}
 
+	Aspect.ApplyMenuUiAspect(IsActive());
 	Ui()->StartCheck();
 	UpdateColors();
 
 	Ui()->Update();
 
-	if(IsActive())
+	if(IsActive() && !m_AssetsEditorState.m_Open && !Aspect.ShowConfirmOverlay())
 		Ui()->DoBackButton();
 
-	Render();
+	if(!Aspect.ShowConfirmOverlay()) Render();
 
 	if(IsActive())
 	{
-		Ui()->RenderBackButton();
-		RenderTools()->RenderCursor(Ui()->MousePos(), 24.0f);
+		if(!m_AssetsEditorState.m_Open && !Aspect.ShowConfirmOverlay()) Ui()->RenderBackButton();
+		if(!Aspect.ShowConfirmOverlay()) RenderTools()->RenderCursor(Ui()->MousePos(), 24.0f);
 	}
 
 	// render debug information
@@ -2423,6 +2437,8 @@ void CMenus::OnRender()
 	if(Ui()->ConsumeHotkey(CUi::HOTKEY_ESCAPE))
 		SetActive(false);
 
+	Aspect.RenderConfirmOverlay(IsActive());
+	Aspect.RestoreMenuUiAspect();
 	Ui()->FinishCheck();
 	Ui()->ClearHotkeys();
 }

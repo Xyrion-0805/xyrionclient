@@ -1,3 +1,4 @@
+#include <game/editor/localization.h>
 /* (c) Magnus Auvinen. See licence.txt in the root of the distribution for more information. */
 /* If you are missing that file, acquire a complete release at teeworlds.com.                */
 #include "layer_tiles.h"
@@ -1277,7 +1278,7 @@ CUi::EPopupMenuFunctionResult CLayerTiles::RenderCommonProperties(SCommonPropSta
 		pEditor->TextRender()->TextColor(ColorRGBA(1.0f, 0.0f, 0.0f, 1.0f));
 		SLabelProperties Props;
 		Props.m_MaxWidth = Warning.w;
-		pEditor->Ui()->DoLabel(&Warning, "Editing multiple layers", 9.0f, TEXTALIGN_ML, Props);
+		pEditor->Ui()->DoLabel(&Warning, EditorLocalize("Editing multiple layers"), 9.0f, TEXTALIGN_ML, Props);
 		pEditor->TextRender()->TextColor(ColorRGBA(1.0f, 1.0f, 1.0f, 1.0f));
 		pToolbox->HSplitTop(2.0f, nullptr, pToolbox);
 	}

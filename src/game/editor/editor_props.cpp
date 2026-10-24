@@ -1,5 +1,6 @@
 #include "editor.h"
 #include "enums.h"
+#include "localization.h"
 
 #include <engine/font_icons.h>
 
@@ -27,7 +28,7 @@ SEditResult<E> CEditor::DoPropertiesWithState(CUIRect *pToolBox, CProperty *pPro
 		CUIRect Label, Shifter;
 		Slot.VSplitMid(&Label, &Shifter);
 		Shifter.HMargin(1.0f, &Shifter);
-		Ui()->DoLabel(&Label, pProps[i].m_pName, 10.0f, TEXTALIGN_ML);
+		Ui()->DoLabel(&Label, EditorLocalize(pProps[i].m_pName), 10.0f, TEXTALIGN_ML);
 
 		if(pProps[i].m_Type == PROPTYPE_INT)
 		{
@@ -150,11 +151,11 @@ SEditResult<E> CEditor::DoPropertiesWithState(CUIRect *pToolBox, CProperty *pPro
 			Left.VSplitLeft(10.0f, &Left, &Shifter);
 			Shifter.VSplitRight(10.0f, &Shifter, &Right);
 			Shifter.Draw(ColorRGBA(1, 1, 1, 0.5f), IGraphics::CORNER_NONE, 0.0f);
-			Ui()->DoLabel(&Shifter, "X", 10.0f, TEXTALIGN_MC);
+			Ui()->DoLabel(&Shifter, EditorLocalize("X"), 10.0f, TEXTALIGN_MC);
 			Up.VSplitLeft(10.0f, &Up, &Shifter);
 			Shifter.VSplitRight(10.0f, &Shifter, &Down);
 			Shifter.Draw(ColorRGBA(1, 1, 1, 0.5f), IGraphics::CORNER_NONE, 0.0f);
-			Ui()->DoLabel(&Shifter, "Y", 10.0f, TEXTALIGN_MC);
+			Ui()->DoLabel(&Shifter, EditorLocalize("Y"), 10.0f, TEXTALIGN_MC);
 			if(DoButton_FontIcon(&pIds[i], FontIcon::MINUS, 0, &Left, BUTTONFLAG_LEFT, "Shift left.", IGraphics::CORNER_L, 7.0f))
 			{
 				*pNewVal = (int)EShiftDirection::LEFT;

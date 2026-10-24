@@ -7,6 +7,7 @@
 #include <engine/graphics.h>
 #include <engine/shared/config.h>
 
+#include "rounded_rect_directions.h"
 #include <atomic>
 #include <cstddef>
 #include <mutex>
@@ -122,6 +123,7 @@ public:
 
 		// texture commands
 		CMD_TEXTURE_CREATE,
+		CMD_TEXTURE_UPDATE,
 		CMD_TEXTURE_DESTROY,
 		CMD_TEXT_TEXTURES_CREATE,
 		CMD_TEXT_TEXTURES_DESTROY,
@@ -131,6 +133,19 @@ public:
 		CMD_CLEAR,
 		CMD_RENDER,
 		CMD_RENDER_TEX3D,
+		CMD_RENDER_MEDIA_ISLAND_SDF,
+		CMD_RENDER_ROUNDED_RECT_SDF,
+		CMD_RENDER_PROCEDURAL_RING,
+		CMD_RENDER_TARGET_CREATE,
+		CMD_RENDER_TARGET_DESTROY,
+		CMD_RENDER_TARGET_BEGIN,
+		CMD_RENDER_TARGET_END,
+		CMD_RENDER_TARGET_DRAW,
+		CMD_RENDER_TARGET_CAPTURE_BACKBUFFER,
+		CMD_RENDER_TARGET_GAUSSIAN_BLUR_PASS,
+		CMD_RENDER_TARGET_READBACK,
+
+		CMD_UI_GLASS,
 
 		// opengl 2.0+ commands (some are just emulated and only exist in opengl 3.3+)
 		CMD_CREATE_BUFFER_OBJECT, // create vbo
@@ -229,6 +244,41 @@ public:
 		SVertex *m_pVertices; // you should use the command buffer data to allocate vertices for this command
 	};
 
+	struct SCommand_RenderMediaIslandSdf : public SCommand
+	{
+		SCommand_RenderMediaIslandSdf() :
+			SCommand(CMD_RENDER_MEDIA_ISLAND_SDF) {}
+		SState m_State;
+		IGraphics::SMediaIslandSdfParams m_Params;
+		int m_BackdropTargetId = -1;
+		EPrimitiveType m_PrimType = EPrimitiveType::QUADS;
+		unsigned m_PrimCount = 1;
+		SVertex *m_pVertices = nullptr;
+	};
+
+	struct SCommand_RenderRoundedRectSdf : public SCommand
+	{
+		SCommand_RenderRoundedRectSdf() :
+			SCommand(CMD_RENDER_ROUNDED_RECT_SDF) {}
+		SState m_State;
+		IGraphics::SRoundedRectSdfParams m_Params;
+		EPrimitiveType m_PrimType = EPrimitiveType::QUADS;
+		unsigned m_PrimCount = 1;
+		SVertex *m_pVertices = nullptr;
+	};
+
+	struct SCommand_RenderProceduralRing : public SCommand
+	{
+		SCommand_RenderProceduralRing() :
+			SCommand(CMD_RENDER_PROCEDURAL_RING) {}
+		SState m_State;
+		vec4 m_RingParams{};
+		EPrimitiveType m_PrimType = EPrimitiveType::QUADS;
+		unsigned m_PrimCount = 1;
+		SVertex *m_pVertices = nullptr;
+	};
+
+
 	struct SCommand_RenderTex3D : public SCommand
 	{
 		SCommand_RenderTex3D() :
@@ -238,6 +288,92 @@ public:
 		unsigned m_PrimCount;
 		SVertexTex3DStream *m_pVertices; // you should use the command buffer data to allocate vertices for this command
 	};
+	struct SCommand_UiGlass : public SCommand
+	{
+		SCommand_UiGlass() : SCommand(CMD_UI_GLASS) {}
+		SState m_State;
+		float m_X, m_Y, m_W, m_H, m_Radius, m_Opacity;
+		int m_Corners;
+		ColorRGBA m_Color;
+		ColorRGBA m_GlassColor;
+		uint64_t m_Frame;
+	};
+
+	struct SCommand_RenderTarget_Create : public SCommand
+	{
+		SCommand_RenderTarget_Create() :
+			SCommand(CMD_RENDER_TARGET_CREATE) {}
+		int m_TargetId = -1;
+		int m_Width = 0;
+		int m_Height = 0;
+	};
+
+	struct SCommand_RenderTarget_Destroy : public SCommand
+	{
+		SCommand_RenderTarget_Destroy() :
+			SCommand(CMD_RENDER_TARGET_DESTROY) {}
+		int m_TargetId = -1;
+	};
+
+	struct SCommand_RenderTarget_Begin : public SCommand
+	{
+		SCommand_RenderTarget_Begin() :
+			SCommand(CMD_RENDER_TARGET_BEGIN) {}
+		int m_TargetId = -1;
+		SColorf m_ClearColor;
+		SState m_State;
+	};
+
+	struct SCommand_RenderTarget_End : public SCommand
+	{
+		SCommand_RenderTarget_End() :
+			SCommand(CMD_RENDER_TARGET_END) {}
+		SState m_State;
+	};
+
+	struct SCommand_RenderTarget_Draw : public SCommand
+	{
+		SCommand_RenderTarget_Draw() :
+			SCommand(CMD_RENDER_TARGET_DRAW) {}
+		int m_TargetId = -1;
+		float m_X = 0.0f;
+		float m_Y = 0.0f;
+		float m_W = 0.0f;
+		float m_H = 0.0f;
+		float m_Alpha = 1.0f;
+		unsigned m_PrimCount = 0;
+		SVertex *m_pVertices = nullptr;
+		SState m_State;
+	};
+
+	struct SCommand_RenderTarget_CaptureBackbuffer : public SCommand
+	{
+		SCommand_RenderTarget_CaptureBackbuffer() :
+			SCommand(CMD_RENDER_TARGET_CAPTURE_BACKBUFFER) {}
+		int m_TargetId = -1;
+	};
+
+	struct SCommand_RenderTarget_GaussianBlurPass : public SCommand
+	{
+		SCommand_RenderTarget_GaussianBlurPass() :
+			SCommand(CMD_RENDER_TARGET_GAUSSIAN_BLUR_PASS) {}
+		int m_SourceTargetId = -1;
+		int m_Radius = 0;
+		bool m_Horizontal = false;
+		IGraphics::EBlurMode m_Mode = IGraphics::EBlurMode::GAUSSIAN;
+		int m_Pass = 0;
+		bool m_Upsample = false;
+		std::array<float, IGraphics::GAUSSIAN_BLUR_MAX_RADIUS + 1> m_aWeights{};
+	};
+
+	struct SCommand_RenderTarget_Readback : public SCommand
+	{
+		SCommand_RenderTarget_Readback() :
+			SCommand(CMD_RENDER_TARGET_READBACK) {}
+		int m_TargetId = -1;
+		CImageInfo *m_pImage = nullptr;
+	};
+
 
 	struct SCommand_CreateBufferObject : public SCommand
 	{
@@ -533,6 +669,17 @@ public:
 		int m_Slot;
 	};
 
+	struct SCommand_Texture_Update : public SCommand
+	{
+		SCommand_Texture_Update() :
+			SCommand(CMD_TEXTURE_UPDATE) {}
+
+		int m_Slot;
+		size_t m_Width;
+		size_t m_Height;
+		uint8_t *m_pData; // RGBA, freed by the command processor
+	};
+
 	struct SCommand_TextTextures_Create : public SCommand
 	{
 		SCommand_TextTextures_Create() :
@@ -721,7 +868,17 @@ public:
 	virtual bool GetDriverVersion(EGraphicsDriverAgeType DriverAgeType, int &Major, int &Minor, int &Patch, const char *&pName, EBackendType BackendType) = 0;
 	// checks if the current values of the config are a graphics modern API
 	virtual bool IsConfigModernAPI() { return false; }
+	virtual bool SupportsUiGlass() { return false; }
 	virtual bool UseTrianglesAsQuad() { return false; }
+	virtual bool HasMediaIslandSdf() { return false; }
+	virtual bool HasRoundedRectSdf() { return false; }
+	virtual bool HasProceduralRing() { return false; }
+	virtual bool HasRenderTargets() { return false; }
+	virtual bool HasRenderTargetGaussianBlur() { return false; }
+	virtual bool HasBackbufferCapture() { return false; }
+	virtual bool RenderTargetExternalPassRequiresSingleSample() { return false; }
+	virtual const char *RenderTargetSupportReason() { return HasRenderTargets() ? "supported" : "unsupported_by_backend"; }
+
 	virtual bool HasTileBuffering() { return false; }
 	virtual bool HasQuadBuffering() { return false; }
 	virtual bool HasTextBuffering() { return false; }
@@ -757,6 +914,15 @@ class CGraphics_Threaded : public IEngineGraphics
 	};
 
 	CCommandBuffer::SState m_State;
+	CCommandBuffer::SState m_RenderTargetSavedState{};
+	bool m_RenderTargetActive = false;
+	bool m_GLRenderTargetsSupported = false;
+	bool m_GLRenderTargetGaussianBlurSupported = false;
+	bool m_GLBackbufferCaptureSupported = false;
+	bool m_GLRenderTargetExternalPassRequiresSingleSample = false;
+	uint32_t m_MultiSamplingCount = 0;
+	uint32_t m_GraphicsResourcesResetVersion = 0;
+	CQmRoundedRectDirections m_RoundedRectDirections;
 	IGraphicsBackend *m_pBackend;
 	bool m_GLTileBufferingEnabled;
 	bool m_GLQuadBufferingEnabled;
@@ -794,6 +960,9 @@ class CGraphics_Threaded : public IEngineGraphics
 
 	std::vector<int> m_vTextureIndices;
 	size_t m_FirstFreeTexture;
+	std::vector<int> m_vRenderTargetIndices;
+	std::vector<ivec2> m_vRenderTargetSizes;
+	size_t m_FirstFreeRenderTarget = 0;
 	int m_TextureMemoryUsage;
 
 	std::atomic<bool> m_WarnPngliteIncompatibleImages = false;
@@ -923,6 +1092,8 @@ public:
 
 	const TTwGraphicsGpuList &GetGpus() const override;
 
+	using IGraphics::MapScreen;
+	using IGraphics::GetScreen;
 	void MapScreen(const CScreenRect &ScreenRect) override;
 	CScreenRect GetScreen() const override;
 
@@ -940,6 +1111,7 @@ public:
 	void LoadTextureAddWarning(size_t Width, size_t Height, int Flags, const char *pTexName);
 	IGraphics::CTextureHandle LoadTextureRaw(const CImageInfo &Image, int Flags, const char *pTexName = nullptr) override;
 	IGraphics::CTextureHandle LoadTextureRawMove(CImageInfo &Image, int Flags, const char *pTexName = nullptr) override;
+	bool UpdateTextureRawMove(CTextureHandle Texture, CImageInfo &Image) override;
 
 	bool LoadTextTextures(size_t Width, size_t Height, CTextureHandle &TextTexture, CTextureHandle &TextOutlineTexture, uint8_t *pTextData, uint8_t *pTextOutlineData) override;
 	bool UnloadTextTextures(CTextureHandle &TextTexture, CTextureHandle &TextOutlineTexture) override;
@@ -975,6 +1147,7 @@ public:
 	void SetColor(float r, float g, float b, float a) override;
 	void SetColor(ColorRGBA Color) override;
 	void SetColor2(ColorRGBA First, ColorRGBA Second) override;
+	void SetColorVertex(const CColorVertex *pArray, size_t Num) override;
 	void SetColor4(ColorRGBA TopLeft, ColorRGBA TopRight, ColorRGBA BottomLeft, ColorRGBA BottomRight) override;
 
 	void ChangeColorOfQuadVertices(size_t QuadOffset, unsigned char r, unsigned char g, unsigned char b, unsigned char a) override;
@@ -1084,6 +1257,8 @@ public:
 	void QuadsDrawFreeform(const CFreeformItem *pArray, int Num) override;
 	void QuadsText(float x, float y, float Size, const char *pText) override;
 
+	float RoundedRectAntialiasSize() const;
+	void DrawRectExtAntialias(float x, float y, float w, float h, float r, int Corners, ColorRGBA Color, bool ResolveGeometry = true);
 	void DrawRectExt(float x, float y, float w, float h, float r, int Corners) override;
 	void DrawRectExt4(float x, float y, float w, float h, ColorRGBA ColorTopLeft, ColorRGBA ColorTopRight, ColorRGBA ColorBottomLeft, ColorRGBA ColorBottomRight, float r, int Corners) override;
 	int CreateRectQuadContainer(float x, float y, float w, float h, float r, int Corners) override;
@@ -1215,6 +1390,40 @@ public:
 	void ResizeToScreen() override;
 	void GotResized(int w, int h, int RefreshRate) override;
 	void UpdateViewport(int X, int Y, int W, int H, bool ByResize) override;
+	void PushPreviewViewport(int X, int Y, int W, int H) override;
+	void PopPreviewViewport() override;
+	bool IsRenderTargetSupported() const override;
+	bool IsRenderTargetGaussianBlurSupported() const override;
+	bool IsBackbufferCaptureSupported() const override;
+	const char *RenderTargetSupportReason() const override;
+	CRenderTargetHandle CreateRenderTarget(int Width, int Height) override;
+	void DestroyRenderTarget(CRenderTargetHandle *pTarget) override;
+	bool BeginRenderTarget(CRenderTargetHandle Target, ColorRGBA ClearColor) override;
+	void EndRenderTarget() override;
+	void DrawRenderTarget(CRenderTargetHandle Target, const SRenderTargetDrawParams &Params) override;
+	// Captures all drawing submitted before this call and scales the current backbuffer
+	// into Target without a CPU readback. Must be called outside an active render target.
+	bool CaptureBackbufferToRenderTarget(CRenderTargetHandle Target) override;
+	// Must be called outside an active render target. Gaussian and Kawase use
+	// the first same-sized temporary target. Dual Kawase uses both temporary
+	// targets as a half/quarter-resolution pyramid before reconstructing the
+	// full-sized destination.
+	bool GaussianBlurRenderTarget(CRenderTargetHandle Source, const std::array<CRenderTargetHandle, DUAL_KAWASE_PYRAMID_LEVELS> &aTemporary, CRenderTargetHandle Destination, const SGaussianBlurParams &Params) override;
+	// 必须在非活动渲染目标状态下调用。Source 和 Destination 为完整分辨率目标，
+	// 三个中间目标必须使用相同的较小尺寸。操作依次执行降采样、模糊和升采样。
+	bool DualBlurRenderTarget(CRenderTargetHandle Source, CRenderTargetHandle Downsample, CRenderTargetHandle DownsampleTemporary, CRenderTargetHandle DownsampleBlurred, CRenderTargetHandle Destination, const SGaussianBlurParams &Params) override;
+
+	void RenderMediaIslandSdf(const SMediaIslandSdfParams &Params, CRenderTargetHandle Backdrop = CRenderTargetHandle()) override;
+	void RenderRoundedRectSdf(const SRoundedRectSdfParams &Params) override;
+	void RenderProceduralRing(const SProceduralRingParams &Params) override;
+	void DrawRoundedRectAntialias(float x, float y, float w, float h, float Radius, int Corners, const ColorRGBA &Color) override;
+	bool HasRoundedRectSdf() override { return m_pBackend->HasRoundedRectSdf(); }
+	bool HasMediaIslandSdf() override { return m_pBackend->HasMediaIslandSdf(); }
+	bool HasProceduralRing() override { return m_pBackend->HasProceduralRing(); }
+	uint32_t GraphicsResourcesResetVersion() const override { return m_GraphicsResourcesResetVersion; }
+
+	bool DrawUiGlass(float x, float y, float w, float h, ColorRGBA Color, int Corners, float Rounding) override;
+	uint64_t m_GlassFrame = 0;
 	bool IsScreenKeyboardShown() override;
 
 	void AddWindowResizeListener(WINDOW_RESIZE_FUNC pFunc) override;
@@ -1275,7 +1484,7 @@ public:
 	TGLBackendReadPresentedImageData &GetReadPresentedImageDataFuncUnsafe() override;
 
 	// TClient
-	void SetForcedAspect(bool Force) override;
+	void SetForcedAspect(bool Force, bool ApplyCustomAspect = true) override;
 };
 
 extern bool g_GraphicsForcedAspect;

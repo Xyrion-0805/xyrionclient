@@ -297,6 +297,7 @@ void CConfigManager::Init()
 
 		AddVariable(m_ConfigHeap.Allocate<SIntConfigVariable>(
 			m_pConsole, pScriptName, SConfigVariable::VAR_INT, Flags, m_ConfigHeap.StoreString(aHelp), pVariable, Default, Min, Max));
+		m_vpAllVariables.back()->m_pHelpLocalizeKey = pDesc;
 	};
 
 #define MACRO_CONFIG_INT(Name, ScriptName, Def, Min, Max, Flags, Desc) \
@@ -313,6 +314,7 @@ void CConfigManager::Init()
 		dbg_assert(HelpSize < sizeof(aHelp) - UTF8_BYTE_LENGTH - 1, "MACRO_CONFIG_COL(%s): help text possibly truncated. Increase size of aHelp.", pScriptName); \
 		AddVariable(m_ConfigHeap.Allocate<SColorConfigVariable>( \
 			m_pConsole, pScriptName, SConfigVariable::VAR_COLOR, Flags, m_ConfigHeap.StoreString(aHelp), &g_Config.m_##Name, Def)); \
+		m_vpAllVariables.back()->m_pHelpLocalizeKey = Desc; \
 	}
 
 #define MACRO_CONFIG_STR(Name, ScriptName, Len, Def, Flags, Desc) \
@@ -324,6 +326,7 @@ void CConfigManager::Init()
 		char *pOldValue = static_cast<char *>(m_ConfigHeap.Allocate(Len)); \
 		AddVariable(m_ConfigHeap.Allocate<SStringConfigVariable>( \
 			m_pConsole, pScriptName, SConfigVariable::VAR_STRING, Flags, m_ConfigHeap.StoreString(aHelp), g_Config.m_##Name, Def, Len, pOldValue)); \
+		m_vpAllVariables.back()->m_pHelpLocalizeKey = Desc; \
 	}
 #define SET_CONFIG_DOMAIN(_ConfigDomain) ConfigDomain = _ConfigDomain;
 #include "config_includes.h"

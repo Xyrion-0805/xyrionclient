@@ -268,6 +268,7 @@ void CMenus::RenderServerbrowserServerList(CUIRect View, bool &WasListboxItemAct
 	s_ListBox.SetActive(!Ui()->IsPopupOpen());
 	s_ListBox.DoStart(ms_ListheaderHeight, NumServers, 1, 3, -1, &View, false);
 
+	bool RevealServerPreview = m_ServerBrowserShouldRevealSelection;
 	if(m_ServerBrowserShouldRevealSelection)
 	{
 		s_ListBox.ScrollToSelected();
@@ -292,6 +293,14 @@ void CMenus::RenderServerbrowserServerList(CUIRect View, bool &WasListboxItemAct
 	if(vpServerBrowserUiElements.size() < (size_t)NumServers)
 		vpServerBrowserUiElements.resize(NumServers, nullptr);
 
+	bool PreviewShown = false;
+	if(g_Config.m_BcServerMapPreview != 0)
+		m_ServerMapPreview.Tick();
+	else
+		m_ServerMapPreview.Clear();
+	if(m_ServerMapPreview.TakeReveal())
+		RevealServerPreview = true;
+	const float PreviewHeight = m_ServerMapPreview.RowHeight();
 	for(int i = 0; i < NumServers; i++)
 	{
 		const CServerInfo *pItem = ServerBrowser()->SortedGet(i);
@@ -303,9 +312,32 @@ void CMenus::RenderServerbrowserServerList(CUIRect View, bool &WasListboxItemAct
 		}
 		CUIElement *pUiElement = vpServerBrowserUiElements[i];
 
-		const CListboxItem ListItem = s_ListBox.DoNextItem(pItem, str_comp(pItem->m_aAddress, g_Config.m_UiServerAddress) == 0);
+		const bool AddressSelected = str_comp(pItem->m_aAddress, g_Config.m_UiServerAddress) == 0;
+		const bool PreviewRow = g_Config.m_BcServerMapPreview != 0 && m_ServerMapPreview.ShowsAddress(pItem->m_aAddress);
+		if(PreviewRow)
+		{
+			if(m_ServerMapPreview.HasMap(pItem) || m_ServerMapPreview.ReadyToLoad())
+				m_ServerMapPreview.SetServer(pItem);
+			else
+				m_ServerMapPreview.MarkUnavailable(pItem);
+		}
+		const bool ShowPreview = PreviewRow && PreviewHeight > 0.5f;
+		if(ShowPreview && AddressSelected)
+			s_ListBox.SuppressNextSelectionHighlight();
+		const CListboxItem ListItem = s_ListBox.DoNextItem(pItem, AddressSelected);
 		if(ListItem.m_Selected)
 			m_SelectedIndex = i;
+
+		CUIRect PreviewRect;
+		const ColorRGBA PreviewFrame(1.0f, 1.0f, 1.0f, s_ListBox.Active() ? 0.5f : 0.33f);
+		if(ShowPreview)
+		{
+			PreviewRect = s_ListBox.DoExtraRow(PreviewHeight, RevealServerPreview);
+			CUIRect Block = ListItem.m_Rect;
+			Block.h = PreviewRect.y + PreviewRect.h - ListItem.m_Rect.y;
+			Block.Draw(PreviewFrame, IGraphics::CORNER_ALL, 12.0f);
+			PreviewShown = true;
+		}
 
 		if(!ListItem.m_Visible)
 		{
@@ -313,7 +345,9 @@ void CMenus::RenderServerbrowserServerList(CUIRect View, bool &WasListboxItemAct
 			if(Ui()->CheckActiveItem(pItem))
 				Ui()->SetActiveItem(nullptr);
 
-			// don't render invisible items
+			// The header can be clipped while its preview remains visible.
+			if(ShowPreview)
+				m_ServerMapPreview.Render(PreviewRect, PreviewFrame);
 			continue;
 		}
 
@@ -458,7 +492,12 @@ void CMenus::RenderServerbrowserServerList(CUIRect View, bool &WasListboxItemAct
 				TextRender()->TextColor(TextRender()->DefaultTextColor());
 			}
 		}
+		if(ShowPreview)
+			m_ServerMapPreview.Render(PreviewRect, PreviewFrame);
 	}
+
+	if(g_Config.m_BcServerMapPreview && !PreviewShown && !m_ServerMapPreview.Expanded() && !m_ServerMapPreview.OpenPending())
+		m_ServerMapPreview.Clear();
 
 	const int NewSelected = s_ListBox.DoEnd();
 	if(NewSelected != m_SelectedIndex)
@@ -472,8 +511,20 @@ void CMenus::RenderServerbrowserServerList(CUIRect View, bool &WasListboxItemAct
 			{
 				str_copy(g_Config.m_UiServerAddress, pItem->m_aAddress);
 				m_ServerBrowserShouldRevealSelection = true;
+				if(g_Config.m_BcServerMapPreview)
+					m_ServerMapPreview.SwitchTo(pItem->m_aAddress);
 			}
 		}
+	}
+
+	else if(g_Config.m_BcServerMapPreview != 0 && NewSelected >= 0 && (s_ListBox.WasItemSelected() || s_ListBox.WasItemActivated()))
+	{
+		if(s_ListBox.WasItemActivated())
+			m_ServerMapPreview.CancelScheduledOpen();
+		else if(m_ServerMapPreview.Expanded() || m_ServerMapPreview.OpenPending())
+			m_ServerMapPreview.Collapse();
+		else
+			m_ServerMapPreview.SwitchTo(g_Config.m_UiServerAddress);
 	}
 
 	WasListboxItemActivated = s_ListBox.WasItemActivated();

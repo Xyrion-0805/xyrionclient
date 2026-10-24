@@ -160,3 +160,17 @@ tags
 
 # TClient
 !steam_api.dll
+
+# The dependency archive is supplied separately; see docs/xyrion/BUILDING.md.
+/ddnet-libs/
+/dist/
+
+# Local captures, validation profiles and credentials are not source assets.
+/tmp/
+/.build-tools/
+/smoke-profile*/
+/.env
+/.env.*
+!/.env.example
+/settings_ddnet.cfg
+/autoexec.cfg

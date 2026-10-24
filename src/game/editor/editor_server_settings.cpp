@@ -1,4 +1,5 @@
-﻿#include "editor_server_settings.h"
+#include <game/editor/localization.h>
+#include "editor_server_settings.h"
 
 #include "editor.h"
 
@@ -572,7 +573,7 @@ void CEditor::RenderMapSettingsErrorDialog()
 	// title bar
 	Title.Draw(ColorRGBA(1, 1, 1, 0.25f), IGraphics::CORNER_ALL, 4.0f);
 	Title.VMargin(10.0f, &Title);
-	Ui()->DoLabel(&Title, "Map settings error", 12.0f, TEXTALIGN_ML);
+	Ui()->DoLabel(&Title, EditorLocalize("Map settings error"), 12.0f, TEXTALIGN_ML);
 
 	// Render body
 	{
@@ -583,7 +584,7 @@ void CEditor::RenderMapSettingsErrorDialog()
 		CUIRect Text;
 		View.HSplitTop(30.0f, &Text, &View);
 		Props.m_MaxWidth = Text.w;
-		Ui()->DoLabel(&Text, "Below is a report of the invalid map settings found when loading the map. Please fix them before proceeding further.", 10.0f, TEXTALIGN_MC, Props);
+		Ui()->DoLabel(&Text, EditorLocalize("Below is a report of the invalid map settings found when loading the map. Please fix them before proceeding further."), 10.0f, TEXTALIGN_MC, Props);
 
 		// Mixed list
 		CUIRect List = View;

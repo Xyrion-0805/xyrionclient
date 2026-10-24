@@ -192,6 +192,9 @@ public:
 	virtual const char *GetCandidate(int Index) const = 0;
 	virtual int GetCandidateCount() const = 0;
 	virtual int GetCandidateSelectedIndex() const = 0;
+	virtual int GetCandidatePageStart() const = 0;
+	virtual int GetCandidatePageSize() const = 0;
+	virtual int GetCandidateTotalCount() const = 0;
 	virtual void SetCompositionWindowPosition(float X, float Y, float H) = 0;
 
 	virtual bool GetDropFile(char *aBuf, int Len) = 0;

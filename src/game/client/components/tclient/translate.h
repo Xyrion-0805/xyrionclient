@@ -70,10 +70,20 @@ class CTranslate : public CComponent
 		std::shared_ptr<CTranslateResponse> m_pTranslateResponse = nullptr;
 		// For outgoing translations (translating our own message before sending it)
 		bool m_IsOutgoing = false;
+		bool m_ExplicitCommand = false;
+		bool m_Ready = false;
+		bool m_Success = false;
+		int m_Connection = 0, m_ClientId = -1, m_DDRaceTeam = 0;
+		int m_GameTeam = 0;
+		int64_t m_Created = 0;
+		bool m_ChineseAuto = false;
 		int m_OutgoingTeam = 0;
 		char m_aOutgoingOriginalText[256] = "";
 	};
 	std::vector<CTranslateJob> m_vJobs;
+	std::string m_ChineseStatus = "自动翻译已关闭";
+	int64_t m_ChineseRetry = 0;
+	int64_t m_NextExplicitSend = 0;
 
 	static void ConTranslate(IConsole::IResult *pResult, void *pUserData);
 	static void ConTranslateId(IConsole::IResult *pResult, void *pUserData);
@@ -82,7 +92,11 @@ public:
 	int Sizeof() const override { return sizeof(*this); }
 
 	void OnConsoleInit() override;
-	void OnRender() override;
+	void OnUpdate() override;
+	void OnReset() override;
+	void OnStateChange(int NewState, int OldState) override;
+	void OnShutdown() override { OnReset(); }
+	const char *ChineseStatus() const { return m_ChineseStatus.c_str(); }
 
 	void Translate(int Id, bool ShowProgress = true);
 	void Translate(const char *pName, bool ShowProgress = true);
@@ -96,6 +110,7 @@ public:
 	// returns true. Returns false if the caller should send pText itself --
 	// mirrors CTClient::ChatDoSpecId's shape so chat.cpp can chain it as
 	// another "else if" instead of a nested block.
+	bool ChatDoTranslateCommand(int Team, const char *pText);
 	bool ChatDoTranslateOutgoing(int Team, const char *pText);
 };
 

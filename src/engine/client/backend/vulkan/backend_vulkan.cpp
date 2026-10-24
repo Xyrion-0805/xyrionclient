@@ -1305,6 +1305,7 @@ protected:
 	void RegisterCommands()
 	{
 		m_aCommandCallbacks[CommandBufferCMDOff(CCommandBuffer::CMD_TEXTURE_CREATE)] = {false, [](SRenderCommandExecuteBuffer &ExecBuffer, const CCommandBuffer::SCommand *pBaseCommand) {}, [this](const CCommandBuffer::SCommand *pBaseCommand, SRenderCommandExecuteBuffer &ExecBuffer) { return Cmd_Texture_Create(static_cast<const CCommandBuffer::SCommand_Texture_Create *>(pBaseCommand)); }};
+		m_aCommandCallbacks[CommandBufferCMDOff(CCommandBuffer::CMD_TEXTURE_UPDATE)] = {false, [](SRenderCommandExecuteBuffer &ExecBuffer, const CCommandBuffer::SCommand *pBaseCommand) {}, [this](const CCommandBuffer::SCommand *pBaseCommand, SRenderCommandExecuteBuffer &ExecBuffer) { return Cmd_Texture_Update(static_cast<const CCommandBuffer::SCommand_Texture_Update *>(pBaseCommand)); }};
 		m_aCommandCallbacks[CommandBufferCMDOff(CCommandBuffer::CMD_TEXTURE_DESTROY)] = {false, [](SRenderCommandExecuteBuffer &ExecBuffer, const CCommandBuffer::SCommand *pBaseCommand) {}, [this](const CCommandBuffer::SCommand *pBaseCommand, SRenderCommandExecuteBuffer &ExecBuffer) { return Cmd_Texture_Destroy(static_cast<const CCommandBuffer::SCommand_Texture_Destroy *>(pBaseCommand)); }};
 		m_aCommandCallbacks[CommandBufferCMDOff(CCommandBuffer::CMD_TEXT_TEXTURES_CREATE)] = {false, [](SRenderCommandExecuteBuffer &ExecBuffer, const CCommandBuffer::SCommand *pBaseCommand) {}, [this](const CCommandBuffer::SCommand *pBaseCommand, SRenderCommandExecuteBuffer &ExecBuffer) { return Cmd_TextTextures_Create(static_cast<const CCommandBuffer::SCommand_TextTextures_Create *>(pBaseCommand)); }};
 		m_aCommandCallbacks[CommandBufferCMDOff(CCommandBuffer::CMD_TEXT_TEXTURES_DESTROY)] = {false, [](SRenderCommandExecuteBuffer &ExecBuffer, const CCommandBuffer::SCommand *pBaseCommand) {}, [this](const CCommandBuffer::SCommand *pBaseCommand, SRenderCommandExecuteBuffer &ExecBuffer) { return Cmd_TextTextures_Destroy(static_cast<const CCommandBuffer::SCommand_TextTextures_Destroy *>(pBaseCommand)); }};
@@ -2566,11 +2567,6 @@ protected:
 
 	[[nodiscard]] bool UpdateTexture(size_t TextureSlot, VkFormat Format, uint8_t *&pData, int64_t XOff, int64_t YOff, size_t Width, size_t Height)
 	{
-		const size_t ImageSize = Width * Height * VulkanFormatToPixelSize(Format);
-		SMemoryBlock<STAGING_BUFFER_IMAGE_CACHE_ID> StagingBuffer;
-		if(!GetStagingBufferImage(StagingBuffer, pData, ImageSize))
-			return false;
-
 		auto &Tex = m_vTextures[TextureSlot];
 
 		if(Tex.m_RescaleCount > 0)
@@ -2590,6 +2586,11 @@ protected:
 			free(pData);
 			pData = pTmpData;
 		}
+
+		const size_t ImageSize = Width * Height * VulkanFormatToPixelSize(Format);
+		SMemoryBlock<STAGING_BUFFER_IMAGE_CACHE_ID> StagingBuffer;
+		if(!GetStagingBufferImage(StagingBuffer, pData, ImageSize))
+			return false;
 
 		if(!ImageBarrier(Tex.m_Img, 0, Tex.m_MipMapCount, 0, 1, Format, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL))
 			return false;
@@ -6795,6 +6796,14 @@ public:
 		free(pData);
 
 		return true;
+	}
+
+	[[nodiscard]] bool Cmd_Texture_Update(const CCommandBuffer::SCommand_Texture_Update *pCommand)
+	{
+		uint8_t *pData = pCommand->m_pData;
+		const bool Ok = UpdateTexture(pCommand->m_Slot, VK_FORMAT_R8G8B8A8_UNORM, pData, 0, 0, pCommand->m_Width, pCommand->m_Height);
+		free(pData);
+		return Ok;
 	}
 
 	[[nodiscard]] bool Cmd_TextTextures_Create(const CCommandBuffer::SCommand_TextTextures_Create *pCommand)

@@ -600,6 +600,7 @@ void CPlayers::RenderPlayer(
 	float Intra,
 	bool RenderGhost)
 {
+	const bool AllowEffects = !GameClient()->IsRenderingDummyMiniMap();
 	CNetObj_Character Prev;
 	CNetObj_Character Player;
 	Prev = *pPrevChar;
@@ -697,7 +698,8 @@ void CPlayers::RenderPlayer(
 		return;
 	}
 
-	GameClient()->m_Flow.Add(Position, Vel * 100.0f, 10.0f);
+	if(AllowEffects)
+		GameClient()->m_Flow.Add(Position, Vel * 100.0f, 10.0f);
 
 	// TClient
 	if(!RenderGhost && ClientId >= 0 && GameClient()->m_aClients[ClientId].m_IsVolleyBall)
@@ -705,11 +707,14 @@ void CPlayers::RenderPlayer(
 		// Update
 		const float Delta = Client()->IntraGameTickSincePrev(g_Config.m_ClDummy);
 		auto &ClientData = GameClient()->m_aClients[ClientId];
-		ClientData.m_VolleyBallAngle += Vel.x * Delta / 64.0f;
-		if(ClientData.m_VolleyBallAngle < 0.0f)
-			ClientData.m_VolleyBallAngle += 2.0f * pi;
-		else if(ClientData.m_VolleyBallAngle > 2.0f * pi)
-			ClientData.m_VolleyBallAngle -= 2.0f * pi;
+		if(AllowEffects)
+		{
+			ClientData.m_VolleyBallAngle += Vel.x * Delta / 64.0f;
+			if(ClientData.m_VolleyBallAngle < 0.0f)
+				ClientData.m_VolleyBallAngle += 2.0f * pi;
+			else if(ClientData.m_VolleyBallAngle > 2.0f * pi)
+				ClientData.m_VolleyBallAngle -= 2.0f * pi;
+		}
 		// Render
 		const CSkin *pSkin = GameClient()->m_Skins.Find(g_Config.m_TcVolleyBallBetterBallSkin);
 		if(!pSkin)
@@ -791,9 +796,17 @@ void CPlayers::RenderPlayer(
 	if(Player.m_Weapon == WEAPON_NINJA)
 		State.Add(&g_pData->m_aAnimations[ANIM_NINJA_SWING], std::clamp(LastAttackTime * 2.0f, 0.0f, 1.0f), 1.0f);
 
+	if(!RenderGhost && GameClient()->m_QmWeaponTrajectory.IsVisible() &&
+		QmWeaponTrajectoryNinjaEnabled(Player.m_Weapon, g_Config.m_QmWeaponTrajectoryNinja != 0, Local))
+	{
+		vec2 NinjaEndPosition;
+		if(GameClient()->m_QmWeaponTrajectory.PredictNinjaEndPosition(Position, Direction, NinjaEndPosition))
+			RenderTools()->RenderTee(&State, &RenderInfo, Player.m_Emote, Direction, NinjaEndPosition, 0.5f, Local);
+	}
+
 	// do skidding
 	if(!InAir && WantOtherDir && length(Vel * 50) > 500.0f)
-		GameClient()->m_Effects.SkidTrail(Position, Vel, Player.m_Direction, Alpha, Volume);
+		AllowEffects ? GameClient()->m_Effects.SkidTrail(Position, Vel, Player.m_Direction, Alpha, Volume) : void();
 
 	// draw gun
 	if(Player.m_Weapon >= 0)
@@ -911,12 +924,12 @@ void CPlayers::RenderPlayer(
 				{
 					Graphics()->QuadsSetRotation(-pi / 2 - State.GetAttach()->m_Angle * pi * 2.0f);
 					WeaponPosition.x -= g_pData->m_Weapons.m_aId[CurrentWeapon].m_Offsetx;
-					GameClient()->m_Effects.PowerupShine(WeaponPosition + vec2(32.0f, 0.0f), vec2(32.0f, 12.0f), Alpha);
+					AllowEffects ? GameClient()->m_Effects.PowerupShine(WeaponPosition + vec2(32.0f, 0.0f), vec2(32.0f, 12.0f), Alpha) : void();
 				}
 				else
 				{
 					Graphics()->QuadsSetRotation(-pi / 2 + State.GetAttach()->m_Angle * pi * 2.0f);
-					GameClient()->m_Effects.PowerupShine(WeaponPosition - vec2(32.0f, 0.0f), vec2(32.0f, 12.0f), Alpha);
+					AllowEffects ? GameClient()->m_Effects.PowerupShine(WeaponPosition - vec2(32.0f, 0.0f), vec2(32.0f, 12.0f), Alpha) : void();
 				}
 				Graphics()->RenderQuadContainerAsSprite(m_WeaponEmoteQuadContainerIndex, QuadOffset, WeaponPosition.x, WeaponPosition.y);
 
@@ -1045,11 +1058,11 @@ void CPlayers::RenderPlayer(
 	vec2 BodyPos = Position + vec2(State.GetBody()->m_X, State.GetBody()->m_Y) * TeeAnimScale;
 	if(RenderInfo.m_TeeRenderFlags & TEE_EFFECT_FROZEN)
 	{
-		GameClient()->m_Effects.FreezingFlakes(BodyPos, vec2(32, 32), Alpha);
+		AllowEffects ? GameClient()->m_Effects.FreezingFlakes(BodyPos, vec2(32, 32), Alpha) : void();
 	}
 	if(RenderInfo.m_TeeRenderFlags & TEE_EFFECT_SPARKLE)
 	{
-		GameClient()->m_Effects.SparkleTrail(BodyPos, Alpha);
+		AllowEffects ? GameClient()->m_Effects.SparkleTrail(BodyPos, Alpha) : void();
 	}
 
 	if(ClientId < 0)
@@ -1269,6 +1282,7 @@ void CPlayers::OnRender()
 	{
 		const CGameClient::CClientData *pClientData = &GameClient()->m_aClients[RenderLastId];
 		RenderHookCollLine(ScreenRect, &pClientData->m_RenderPrev, &pClientData->m_RenderCur, RenderLastId);
+		GameClient()->m_QmWeaponTrajectory.Render(&pClientData->m_RenderPrev, &pClientData->m_RenderCur, RenderLastId);
 		RenderPlayer(ScreenRect, &pClientData->m_RenderPrev, &pClientData->m_RenderCur, &aRenderInfo[RenderLastId], RenderLastId);
 	}
 }

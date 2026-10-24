@@ -21,6 +21,7 @@
 
 void CItems::RenderProjectile(const CProjectileData *pCurrent, int ItemId, const CScreenRect &ScreenRect)
 {
+	const bool AllowEffects = !GameClient()->IsRenderingDummyMiniMap();
 	int CurWeapon = std::clamp(pCurrent->m_Type, 0, NUM_WEAPONS - 1);
 
 	// get positions
@@ -101,7 +102,7 @@ void CItems::RenderProjectile(const CProjectileData *pCurrent, int ItemId, const
 	// don't check for validity of the projectile for the current weapon here, so particle effects are rendered for mod compatibility
 	if(CurWeapon == WEAPON_GRENADE)
 	{
-		GameClient()->m_Effects.SmokeTrail(Pos, Vel * -1, Alpha, 0.0f);
+		AllowEffects ? GameClient()->m_Effects.SmokeTrail(Pos, Vel * -1, Alpha, 0.0f) : void();
 		static float s_Time = 0.0f;
 		static float s_LastLocalTime = LocalTime();
 		s_Time += (LocalTime() - s_LastLocalTime) * GameClient()->GetAnimationPlaybackSpeed();
@@ -110,7 +111,7 @@ void CItems::RenderProjectile(const CProjectileData *pCurrent, int ItemId, const
 	}
 	else
 	{
-		GameClient()->m_Effects.BulletTrail(Pos, Alpha, 0.0f);
+		AllowEffects ? GameClient()->m_Effects.BulletTrail(Pos, Alpha, 0.0f) : void();
 
 		if(length(Vel) > 0.00001f)
 			Graphics()->QuadsSetRotation(angle(Vel));
@@ -128,6 +129,7 @@ void CItems::RenderProjectile(const CProjectileData *pCurrent, int ItemId, const
 
 void CItems::RenderPickup(const CNetObj_Pickup *pPrev, const CNetObj_Pickup *pCurrent, bool IsPredicted, int Flags)
 {
+	const bool AllowEffects = !GameClient()->IsRenderingDummyMiniMap();
 	int CurWeapon = std::clamp(pCurrent->m_Subtype, 0, NUM_WEAPONS - 1);
 	int QuadOffset = 2;
 	float IntraTick = IsPredicted ? Client()->PredIntraGameTick(g_Config.m_ClDummy) : Client()->IntraGameTick(g_Config.m_ClDummy);
@@ -156,9 +158,9 @@ void CItems::RenderPickup(const CNetObj_Pickup *pPrev, const CNetObj_Pickup *pCu
 	{
 		QuadOffset = m_PickupNinjaOffset;
 		if(Flags & PICKUPFLAG_ROTATE)
-			GameClient()->m_Effects.PowerupShine(Pos, vec2(18, 96), 1.0f);
+			AllowEffects ? GameClient()->m_Effects.PowerupShine(Pos, vec2(18, 96), 1.0f) : void();
 		else
-			GameClient()->m_Effects.PowerupShine(Pos, vec2(96, 18), 1.0f);
+			AllowEffects ? GameClient()->m_Effects.PowerupShine(Pos, vec2(96, 18), 1.0f) : void();
 
 		Graphics()->TextureSet(GameClient()->m_GameSkin.m_SpritePickupNinja);
 	}
@@ -367,6 +369,18 @@ void CItems::RenderLaser(vec2 From, vec2 Pos, ColorRGBA OuterColor, ColorRGBA In
 		Graphics()->TextureClear();
 		Graphics()->QuadsBegin();
 
+		if(g_Config.m_BcLaserBeautify && Type != LASERTYPE_DOOR)
+		{
+			// BestClient-style soft halo behind the normal laser body.
+			const ColorRGBA GlowColor = OuterColor.WithAlpha(OuterColor.a * 0.20f);
+			Graphics()->SetColor(GlowColor);
+			const vec2 GlowOut = vec2(Dir.y, -Dir.x) * (11.0f * Ia);
+			IGraphics::CFreeformItem Glow(
+				From - GlowOut, From + GlowOut,
+				Pos - GlowOut, Pos + GlowOut);
+			Graphics()->QuadsDrawFreeform(&Glow, 1);
+		}
+
 		// do outline
 		Graphics()->SetColor(OuterColor);
 		vec2 Out = vec2(Dir.y, -Dir.x) * (7.0f * Ia);
@@ -454,6 +468,7 @@ void CItems::RenderLaser(vec2 From, vec2 Pos, ColorRGBA OuterColor, ColorRGBA In
 
 void CItems::OnRender()
 {
+	const bool AllowEffects = !GameClient()->IsRenderingDummyMiniMap();
 	if(Client()->State() != IClient::STATE_ONLINE && Client()->State() != IClient::STATE_DEMOPLAYBACK)
 		return;
 
@@ -544,14 +559,15 @@ void CItems::OnRender()
 				if(auto *pProj = (CProjectile *)GameClient()->m_GameWorld.FindMatch(Item.m_Id, Item.m_Type, pData))
 				{
 					bool IsOtherTeam = GameClient()->IsOtherTeam(pProj->GetOwner());
-					if(pProj->m_LastRenderTick <= 0 && (pProj->m_Type != WEAPON_SHOTGUN || (!pProj->m_Freeze && !pProj->m_Explosive)) // skip ddrace shotgun bullets
+					if(AllowEffects && pProj->m_LastRenderTick <= 0 && (pProj->m_Type != WEAPON_SHOTGUN || (!pProj->m_Freeze && !pProj->m_Explosive)) // skip ddrace shotgun bullets
 						&& (pProj->m_Type == WEAPON_SHOTGUN || absolute(length(pProj->m_Direction) - 1.f) < 0.02f) // workaround to skip grenades on ball mod
 						&& (pProj->GetOwner() < 0 || !GameClient()->m_aClients[pProj->GetOwner()].m_IsPredictedLocal || IsOtherTeam) // skip locally predicted projectiles
 						&& !Client()->SnapFindItem(IClient::SNAP_PREV, Item.m_Type, Item.m_Id))
 					{
 						ReconstructSmokeTrail(&Data, pProj->m_DestroyTick);
 					}
-					pProj->m_LastRenderTick = Client()->GameTick(g_Config.m_ClDummy);
+					if(AllowEffects)
+						pProj->m_LastRenderTick = Client()->GameTick(g_Config.m_ClDummy);
 					if(!IsOtherTeam)
 						continue;
 				}
@@ -711,6 +727,8 @@ void CItems::OnInit()
 
 void CItems::ReconstructSmokeTrail(const CProjectileData *pCurrent, int DestroyTick)
 {
+	if(GameClient()->IsRenderingDummyMiniMap())
+		return;
 	bool LocalPlayerInGame = false;
 
 	if(GameClient()->m_Snap.m_pLocalInfo)

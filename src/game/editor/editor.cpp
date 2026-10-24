@@ -4,6 +4,7 @@
 #include "editor.h"
 
 #include "auto_map.h"
+#include "localization.h"
 #include "editor_actions.h"
 
 #include <base/color.h>
@@ -3257,7 +3258,7 @@ void CEditor::RenderImagesList(CUIRect ToolBox)
 		CUIRect Slot;
 		ToolBox.HSplitTop(RowHeight + 3.0f, &Slot, &ToolBox);
 		if(ScrollRegion.AddRect(Slot))
-			Ui()->DoLabel(&Slot, e == 0 ? "Embedded" : "External", 12.0f, TEXTALIGN_MC);
+			Ui()->DoLabel(&Slot, EditorLocalize(e == 0 ? "Embedded" : "External"), 12.0f, TEXTALIGN_MC);
 
 		for(int i = 0; i < (int)Map()->m_vpImages.size(); i++)
 		{
@@ -3386,7 +3387,7 @@ void CEditor::RenderSounds(CUIRect ToolBox)
 	CUIRect Slot;
 	ToolBox.HSplitTop(RowHeight + 3.0f, &Slot, &ToolBox);
 	if(ScrollRegion.AddRect(Slot))
-		Ui()->DoLabel(&Slot, "Embedded", 12.0f, TEXTALIGN_MC);
+		Ui()->DoLabel(&Slot, EditorLocalize("Embedded"), 12.0f, TEXTALIGN_MC);
 
 	for(int i = 0; i < (int)Map()->m_vpSounds.size(); i++)
 	{
@@ -3576,7 +3577,7 @@ void CEditor::RenderTooltip(CUIRect TooltipRect)
 
 	char aBuf[256];
 	if(m_pUiGotContext && m_pUiGotContext == Ui()->HotItem())
-		str_format(aBuf, sizeof(aBuf), "%s Right click for context menu.", m_aTooltip);
+		str_format(aBuf, sizeof(aBuf), EditorLocalize("%s Right click for context menu."), m_aTooltip);
 	else
 		str_copy(aBuf, m_aTooltip);
 
@@ -4874,6 +4875,8 @@ void CEditor::OnInput(const IInput::CEvent &Event)
 
 void CEditor::OnRender()
 {
+	static bool s_ChineseLoaded = false;
+	if(!s_ChineseLoaded) { InitEditorLocalization(Storage(), nullptr); s_ChineseLoaded = true; }
 	Ui()->SetMouseSlow(false);
 
 	// toggle gui
@@ -4895,6 +4898,7 @@ void CEditor::OnRender()
 	m_pUiGotContext = nullptr;
 	Ui()->StartCheck();
 
+	Ui()->BeginQmFrame();
 	Ui()->Update();
 
 	Ui()->DoBackButton();
@@ -4916,7 +4920,7 @@ void CEditor::OnRender()
 	Ui()->ClearHotkeys();
 	Input()->Clear();
 
-	CLineInput::RenderCandidates();
+	CLineInput::RenderLegacyCandidates();
 
 #if defined(CONF_DEBUG)
 	Map()->CheckIntegrity();

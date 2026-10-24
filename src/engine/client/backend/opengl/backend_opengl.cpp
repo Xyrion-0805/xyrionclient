@@ -9,7 +9,9 @@
 #ifndef BACKEND_NO_SDL
 #include <engine/client/backend_sdl.h>
 #endif
+#include <engine/client/backend/render_target_geometry.h>
 #include <engine/graphics.h>
+#include <engine/storage.h>
 
 #include <cstdint>
 
@@ -42,12 +44,27 @@
 #endif
 
 // ------------ CCommandProcessorFragment_OpenGL
+void CCommandProcessorFragment_OpenGL::SetClipRect(const CCommandBuffer::SState &State)
+{
+	if(m_RenderTargetActive)
+	{
+		const auto &Target = m_vRenderTargets[m_ActiveRenderTargetId];
+		const auto Clip = render_target_geometry::MapScreenClip(State.m_ClipX, State.m_ClipY, State.m_ClipW, State.m_ClipH,
+			m_CanvasWidth, m_CanvasHeight, Target.m_Width, Target.m_Height);
+		glScissor(Clip.m_X, Target.m_Height - Clip.m_Y - Clip.m_H, Clip.m_W, Clip.m_H);
+	}
+	else
+	{
+		glScissor(m_ViewportX + State.m_ClipX, m_ViewportY + State.m_ClipY, State.m_ClipW, State.m_ClipH);
+	}
+}
+
 void CCommandProcessorFragment_OpenGL::Cmd_Update_Viewport(const CCommandBuffer::SCommand_Update_Viewport *pCommand)
 {
 	// The viewport is given relative to the top left of the drawable area, whereas
 	// OpenGL places it relative to the bottom left.
 	m_ViewportX = pCommand->m_X;
-	m_ViewportY = pCommand->m_DrawableHeight - pCommand->m_Y - pCommand->m_Height;
+	m_ViewportY = graphics_viewport::OpenGLViewportY(pCommand->m_DrawableHeight, pCommand->m_Y, pCommand->m_Height);
 	if(pCommand->m_ByResize)
 	{
 		m_CanvasWidth = (uint32_t)pCommand->m_Width;
@@ -101,7 +118,7 @@ void CCommandProcessorFragment_OpenGL::SetState(const CCommandBuffer::SState &St
 	{
 		// The clip rectangle is relative to the viewport, whereas glScissor is
 		// relative to the drawable area.
-		glScissor(m_ViewportX + State.m_ClipX, m_ViewportY + State.m_ClipY, State.m_ClipW, State.m_ClipH);
+		SetClipRect(State);
 		glEnable(GL_SCISSOR_TEST);
 		m_LastClipEnable = true;
 	}
@@ -338,6 +355,7 @@ bool CCommandProcessorFragment_OpenGL::GetPresentedImageData(uint32_t &Width, ui
 
 bool CCommandProcessorFragment_OpenGL::InitOpenGL(const SCommand_Init *pCommand)
 {
+	m_pUiGlassStorage = pCommand->m_pStorage;
 	m_IsOpenGLES = pCommand->m_RequestedBackend == BACKEND_TYPE_OPENGL_ES;
 
 	*pCommand->m_pReadPresentedImageDataFunc = [this](uint32_t &Width, uint32_t &Height, CImageInfo::EImageFormat &Format, std::vector<uint8_t> &vDstData) {
@@ -920,7 +938,7 @@ void CCommandProcessorFragment_OpenGL::TextureCreate(int Slot, int Width, int He
 
 	// calculate memory usage
 	m_vTextures[Slot].m_MemSize = (size_t)Width * Height * PixelSize;
-	while(Width > 2 && Height > 2)
+	while((Flags & TextureFlag::NO_MIPMAPS) == 0 && Width > 2 && Height > 2)
 	{
 		Width >>= 1;
 		Height >>= 1;
@@ -935,6 +953,11 @@ void CCommandProcessorFragment_OpenGL::TextureCreate(int Slot, int Width, int He
 void CCommandProcessorFragment_OpenGL::Cmd_Texture_Create(const CCommandBuffer::SCommand_Texture_Create *pCommand)
 {
 	TextureCreate(pCommand->m_Slot, pCommand->m_Width, pCommand->m_Height, GL_RGBA, GL_RGBA, pCommand->m_Flags, pCommand->m_pData);
+}
+
+void CCommandProcessorFragment_OpenGL::Cmd_Texture_Update(const CCommandBuffer::SCommand_Texture_Update *pCommand)
+{
+	TextureUpdate(pCommand->m_Slot, 0, 0, pCommand->m_Width, pCommand->m_Height, GL_RGBA, pCommand->m_pData);
 }
 
 void CCommandProcessorFragment_OpenGL::Cmd_TextTexture_Update(const CCommandBuffer::SCommand_TextTexture_Update *pCommand)
@@ -1083,6 +1106,8 @@ CCommandProcessorFragment_OpenGL::CCommandProcessorFragment_OpenGL()
 	m_HasShaders = false;
 }
 
+#include "ui_glass.inl"
+
 ERunCommandReturnTypes CCommandProcessorFragment_OpenGL::RunCommand(const CCommandBuffer::SCommand *pBaseCommand)
 {
 	switch(pBaseCommand->m_Cmd)
@@ -1091,6 +1116,7 @@ ERunCommandReturnTypes CCommandProcessorFragment_OpenGL::RunCommand(const CComma
 		Cmd_Init(static_cast<const SCommand_Init *>(pBaseCommand));
 		break;
 	case CCommandProcessorFragment_OpenGL::CMD_SHUTDOWN:
+		ShutdownUiGlass();
 		Cmd_Shutdown(static_cast<const SCommand_Shutdown *>(pBaseCommand));
 		break;
 	case CCommandBuffer::CMD_TEXTURE_CREATE:
@@ -1098,6 +1124,9 @@ ERunCommandReturnTypes CCommandProcessorFragment_OpenGL::RunCommand(const CComma
 		break;
 	case CCommandBuffer::CMD_TEXTURE_DESTROY:
 		Cmd_Texture_Destroy(static_cast<const CCommandBuffer::SCommand_Texture_Destroy *>(pBaseCommand));
+		break;
+	case CCommandBuffer::CMD_TEXTURE_UPDATE:
+		Cmd_Texture_Update(static_cast<const CCommandBuffer::SCommand_Texture_Update *>(pBaseCommand));
 		break;
 	case CCommandBuffer::CMD_TEXT_TEXTURES_CREATE:
 		Cmd_TextTextures_Create(static_cast<const CCommandBuffer::SCommand_TextTextures_Create *>(pBaseCommand));
@@ -1109,14 +1138,53 @@ ERunCommandReturnTypes CCommandProcessorFragment_OpenGL::RunCommand(const CComma
 		Cmd_TextTexture_Update(static_cast<const CCommandBuffer::SCommand_TextTexture_Update *>(pBaseCommand));
 		break;
 	case CCommandBuffer::CMD_CLEAR:
+		m_UiGlassFrame = UINT64_MAX;
 		Cmd_Clear(static_cast<const CCommandBuffer::SCommand_Clear *>(pBaseCommand));
+		break;
+	case CCommandBuffer::CMD_UI_GLASS:
+		Cmd_UiGlass(static_cast<const CCommandBuffer::SCommand_UiGlass *>(pBaseCommand));
 		break;
 	case CCommandBuffer::CMD_RENDER:
 		Cmd_Render(static_cast<const CCommandBuffer::SCommand_Render *>(pBaseCommand));
 		break;
+	case CCommandBuffer::CMD_RENDER_MEDIA_ISLAND_SDF:
+		Cmd_RenderMediaIslandSdf(static_cast<const CCommandBuffer::SCommand_RenderMediaIslandSdf *>(pBaseCommand));
+		break;
+	case CCommandBuffer::CMD_RENDER_ROUNDED_RECT_SDF:
+		Cmd_RenderRoundedRectSdf(static_cast<const CCommandBuffer::SCommand_RenderRoundedRectSdf *>(pBaseCommand));
+		break;
+	case CCommandBuffer::CMD_RENDER_PROCEDURAL_RING:
+		Cmd_RenderProceduralRing(static_cast<const CCommandBuffer::SCommand_RenderProceduralRing *>(pBaseCommand));
+		break;
+
 	case CCommandBuffer::CMD_RENDER_TEX3D:
 		Cmd_RenderTex3D(static_cast<const CCommandBuffer::SCommand_RenderTex3D *>(pBaseCommand));
 		break;
+	case CCommandBuffer::CMD_RENDER_TARGET_CREATE:
+		Cmd_RenderTarget_Create(static_cast<const CCommandBuffer::SCommand_RenderTarget_Create *>(pBaseCommand));
+		break;
+	case CCommandBuffer::CMD_RENDER_TARGET_DESTROY:
+		Cmd_RenderTarget_Destroy(static_cast<const CCommandBuffer::SCommand_RenderTarget_Destroy *>(pBaseCommand));
+		break;
+	case CCommandBuffer::CMD_RENDER_TARGET_BEGIN:
+		Cmd_RenderTarget_Begin(static_cast<const CCommandBuffer::SCommand_RenderTarget_Begin *>(pBaseCommand));
+		break;
+	case CCommandBuffer::CMD_RENDER_TARGET_END:
+		Cmd_RenderTarget_End(static_cast<const CCommandBuffer::SCommand_RenderTarget_End *>(pBaseCommand));
+		break;
+	case CCommandBuffer::CMD_RENDER_TARGET_DRAW:
+		Cmd_RenderTarget_Draw(static_cast<const CCommandBuffer::SCommand_RenderTarget_Draw *>(pBaseCommand));
+		break;
+	case CCommandBuffer::CMD_RENDER_TARGET_CAPTURE_BACKBUFFER:
+		Cmd_RenderTarget_CaptureBackbuffer(static_cast<const CCommandBuffer::SCommand_RenderTarget_CaptureBackbuffer *>(pBaseCommand));
+		break;
+	case CCommandBuffer::CMD_RENDER_TARGET_GAUSSIAN_BLUR_PASS:
+		Cmd_RenderTarget_GaussianBlurPass(static_cast<const CCommandBuffer::SCommand_RenderTarget_GaussianBlurPass *>(pBaseCommand));
+		break;
+	case CCommandBuffer::CMD_RENDER_TARGET_READBACK:
+		Cmd_RenderTarget_Readback(static_cast<const CCommandBuffer::SCommand_RenderTarget_Readback *>(pBaseCommand));
+		break;
+
 	case CCommandBuffer::CMD_TRY_SWAP_AND_READ_PIXEL:
 		Cmd_ReadPixel(static_cast<const CCommandBuffer::SCommand_TrySwapAndReadPixel *>(pBaseCommand));
 		break;
@@ -1196,7 +1264,7 @@ void CCommandProcessorFragment_OpenGL2::SetState(const CCommandBuffer::SState &S
 	{
 		// The clip rectangle is relative to the viewport, whereas glScissor is
 		// relative to the drawable area.
-		glScissor(m_ViewportX + State.m_ClipX, m_ViewportY + State.m_ClipY, State.m_ClipW, State.m_ClipH);
+		SetClipRect(State);
 		glEnable(GL_SCISSOR_TEST);
 		m_LastClipEnable = true;
 	}

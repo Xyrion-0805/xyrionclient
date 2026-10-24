@@ -2,6 +2,8 @@
 /* If you are missing that file, acquire a complete release at teeworlds.com.                */
 #ifndef GAME_CLIENT_COMPONENTS_CHAT_H
 #define GAME_CLIENT_COMPONENTS_CHAT_H
+#include "qmclient/chat_command_hud.h"
+#include "qmclient/qm_chat_export_metadata.h"
 
 #include <base/str.h>
 
@@ -17,6 +19,8 @@
 #include <game/client/render.h>
 
 #include <vector>
+#include <string>
+class IHttpRequest;
 
 class CTranslateResponse
 {
@@ -30,6 +34,7 @@ constexpr auto SAVES_FILE = "ddnet-saves.txt";
 
 class CChat : public CComponent
 {
+	friend class CChatBubbles;
 	static constexpr float CHAT_HEIGHT_FULL = 200.0f;
 	static constexpr float CHAT_HEIGHT_MIN = 50.0f;
 	static constexpr float CHAT_FONTSIZE_WIDTH_RATIO = 2.5f;
@@ -64,12 +69,14 @@ class CChat : public CComponent
 		int m_QuadContainerIndex;
 
 		std::shared_ptr<CManagedTeeRenderInfo> m_pManagedTeeRenderInfo;
+		std::shared_ptr<const QmChatExport::SMetadata> m_pExportMetadata;
 
 		float m_TextYOffset;
 
 		int m_TimesRepeated;
 
 		std::shared_ptr<CTranslateResponse> m_pTranslateResponse;
+		CUIRect m_BackgroundRect{};
 	};
 
 	bool m_PrevScoreBoardShowed;
@@ -122,6 +129,8 @@ class CChat : public CComponent
 		char m_aName[IConsole::TEMPCMD_NAME_LENGTH];
 		char m_aParams[IConsole::TEMPCMD_PARAMS_LENGTH];
 		char m_aHelpText[IConsole::TEMPCMD_HELP_LENGTH];
+		std::string m_ChineseHelp;
+		std::shared_ptr<IHttpRequest> m_pHelpRequest;
 
 		CCommand() = default;
 		CCommand(const char *pName, const char *pParams, const char *pHelpText)
@@ -138,6 +147,13 @@ class CChat : public CComponent
 
 	std::vector<CCommand> m_vServerCommands;
 	bool m_ServerCommandsNeedSorting;
+	uint64_t m_ServerCommandsRevision = 0;
+	CQmChatCommandHud m_CommandHud;
+	void UpdateCommandHudCandidates();
+	bool HandleCommandHudInput(const IInput::CEvent &Event);
+	void ApplyCommandHudCompletion(const std::string &Completion, size_t Cursor);
+	vec2 GetChatMousePos() const;
+	void RenderCommandHud(float X, float Bottom, float Width, float FontSize);
 
 	struct CHistoryEntry
 	{
@@ -175,6 +191,7 @@ class CChat : public CComponent
 
 public:
 	CChat();
+	const char *CurrentInput() const { return m_Input.GetString(); }
 	int Sizeof() const override { return sizeof(*this); }
 
 	static constexpr float MESSAGE_TEE_PADDING_RIGHT = 0.5f;

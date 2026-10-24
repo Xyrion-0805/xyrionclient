@@ -176,6 +176,10 @@ private:
 
 	// the player core for the physics
 	CCharacterCore m_Core;
+	int m_AxiomHookQuad = -1;
+	vec2 m_AxiomHookLocalPos = vec2(0, 0);
+	bool m_LastAxiomRefillJumps = false;
+	void HandleAxiomQuads();
 
 	// DDRace
 

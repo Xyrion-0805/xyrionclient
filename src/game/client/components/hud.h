@@ -65,6 +65,13 @@ class CHud : public CComponent
 	STextContainerIndex m_aPlayerPositionContainers[2];
 	float m_aPlayerPrevPosition[2];
 
+	IGraphics::CRenderTargetHandle m_DummyMiniViewRenderTarget;
+	int m_DummyMiniViewRenderTargetWidth = 0;
+	int m_DummyMiniViewRenderTargetHeight = 0;
+	unsigned m_DummyMiniViewGraphicsVersion = 0;
+	void DestroyDummyMiniViewRenderTarget();
+	bool GetDummyMiniMapRect(float &X, float &Y, float &W, float &H) const;
+	void RenderDummyMiniMap();
 	void RenderCursor();
 
 	void RenderTextInfo();
@@ -109,10 +116,12 @@ class CHud : public CComponent
 
 public:
 	CHud();
+	float GetPlayerRecordSeconds(int Dummy) const { return m_aPlayerRecord[Dummy]; }
 	int Sizeof() const override { return sizeof(*this); }
 
 	void ResetHudContainers();
 	void OnWindowResize() override;
+	void OnShutdown() override;
 	void OnReset() override;
 	void OnRender() override;
 	void OnInit() override;
@@ -125,6 +134,7 @@ public:
 
 private:
 	void RenderRecord();
+	void RenderGoresDrownBoard();
 	void RenderDDRaceEffects();
 	float m_TimeCpDiff;
 	float m_aPlayerRecord[NUM_DUMMIES];

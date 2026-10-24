@@ -201,6 +201,10 @@ void CGameWorld::RemoveEntities()
 
 void CGameWorld::Tick()
 {
+	// Every cloned prediction world shares the client collision instance.
+	// Set its time before ANY entity runs, including rewinds/extra prediction.
+	if(m_pCollision)
+		m_pCollision->SetAxiomQuadTick(GameTick(), GameTickSpeed());
 	// update all objects
 	for(int i = 0; i < NUM_ENTTYPES; i++)
 	{

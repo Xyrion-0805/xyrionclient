@@ -70,6 +70,7 @@ std::wstring windows_utf8_to_wide(const char *str);
  * @remark The strings are treated as null-terminated strings.
  */
 std::optional<std::string> windows_wide_to_utf8(const wchar_t *wide_str);
+std::optional<std::string> windows_wide_to_utf8_bounded(const wchar_t *wide_str, const wchar_t *wide_end);
 
 /**
  * This is a RAII wrapper to initialize/uninitialize the Windows COM library,

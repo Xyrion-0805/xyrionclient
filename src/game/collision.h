@@ -8,6 +8,7 @@
 #include <engine/shared/protocol.h>
 
 #include <map>
+#include <memory>
 #include <vector>
 
 class CTile;
@@ -17,6 +18,7 @@ class CSpeedupTile;
 class CSwitchTile;
 class CTuneTile;
 class CDoorTile;
+class CAxiomQuadCollision;
 
 enum
 {
@@ -41,9 +43,9 @@ public:
 	void Unload();
 	void FillAntibot(CAntibotMapData *pMapData) const;
 
-	bool CheckPoint(float x, float y) const { return IsSolid(round_to_int(x), round_to_int(y)); }
+	bool CheckPoint(float x, float y) const;
 	bool CheckPoint(vec2 Pos) const { return CheckPoint(Pos.x, Pos.y); }
-	int GetCollisionAt(float x, float y) const { return GetTile(round_to_int(x), round_to_int(y)); }
+	int GetCollisionAt(float x, float y) const;
 	int GetWidth() const { return m_Width; }
 	int GetHeight() const { return m_Height; }
 	int IntersectLine(vec2 Pos0, vec2 Pos1, vec2 *pOutCollision, vec2 *pOutBeforeCollision) const;
@@ -53,6 +55,21 @@ public:
 	void MoveBox(vec2 *pInoutPos, vec2 *pInoutVel, vec2 Size, vec2 Elasticity, bool *pGrounded = nullptr) const;
 	bool TestBox(vec2 Pos, vec2 Size) const;
 	bool IsOnGround(vec2 Pos, float Size) const;
+
+	// Opt-in per instance. Only CGameClient enables this; server collisions
+	// retain the original tile physics even when client config is enabled.
+	void SetAxiomQuadCollision(bool Enabled);
+	bool AxiomQuadCollisionEnabled() const { return m_pAxiomQuads != nullptr; }
+	void SetAxiomQuadRoundStartTick(int Tick) { m_AxiomRoundStartTick = Tick; }
+	void SetAxiomQuadTick(int Tick, int TickSpeed);
+	void SetAxiomQuadTime(double Seconds);
+	double AxiomQuadTime() const { return m_AxiomQuadTime; }
+	int GetAxiomQuadTile(vec2 Pos) const;
+	bool HasAxiomQuadTile(vec2 Pos, int Tile) const;
+	std::vector<int> GetAxiomQuadTiles(vec2 Pos) const;
+	int GetAxiomQuadTuneZone(vec2 Pos) const;
+	bool FindAxiomHookAnchor(vec2 Pos, int *pQuadIndex, vec2 *pLocalPos) const;
+	bool GetAxiomHookAnchor(int QuadIndex, vec2 LocalPos, vec2 *pWorldPos) const;
 
 	// DDRace
 	void SetCollisionAt(float x, float y, int Index);
@@ -147,6 +164,12 @@ public:
 	const std::vector<vec2> &TeleOthers(int Number) { return m_TeleOthers[Number]; }
 
 private:
+	bool TestTileBox(vec2 Pos, vec2 Size) const;
+	void PushBoxOutsideAxiomQuads(vec2 *pPos, vec2 *pVel, vec2 Size, vec2 Elasticity, bool *pGrounded) const;
+	std::unique_ptr<CAxiomQuadCollision> m_pAxiomQuads;
+	int m_AxiomRoundStartTick = 0;
+	double m_AxiomQuadTime = 0;
+
 	CLayers *m_pLayers;
 
 	int m_Width;

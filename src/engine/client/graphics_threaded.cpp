@@ -11,6 +11,7 @@
 #include <base/str.h>
 #include <base/time.h>
 
+#include "rounded_rect_geometry.h"
 #include <engine/engine.h>
 #include <engine/gfx/image_loader.h>
 #include <engine/gfx/image_manipulation.h>
@@ -30,6 +31,46 @@
 #include <algorithm>
 
 class CSemaphore;
+
+static constexpr int RECT_CORNER_SEGMENTS = CQmRoundedRectDirections::MAX_SEGMENTS;
+static inline int RoundedRectSegmentCount()
+{
+	return std::clamp(g_Config.m_QmRectCornerSegments & ~1, CQmRoundedRectDirections::MIN_SEGMENTS, RECT_CORNER_SEGMENTS);
+}
+static constexpr float RECT_ANTIALIAS_PIXEL_SIZE = 1.25f;
+
+
+static CCommandBuffer::SColor ColorRGBAToCommandColor(ColorRGBA Color)
+{
+	CCommandBuffer::SColor Result;
+	Result.r = (unsigned char)(std::clamp(Color.r, 0.0f, 1.0f) * 255.0f + 0.5f);
+	Result.g = (unsigned char)(std::clamp(Color.g, 0.0f, 1.0f) * 255.0f + 0.5f);
+	Result.b = (unsigned char)(std::clamp(Color.b, 0.0f, 1.0f) * 255.0f + 0.5f);
+	Result.a = (unsigned char)(std::clamp(Color.a, 0.0f, 1.0f) * 255.0f + 0.5f);
+	return Result;
+}
+
+static ColorRGBA ColorWithAlpha(ColorRGBA Color, float Alpha)
+{
+	Color.a = Alpha;
+	return Color;
+}
+
+// 方向向量由 CQmRoundedRectDirections 按档位预计算，这里不再逐段算 cos/sin。
+static IGraphics::CFreeformItem RoundedRectAntialiasSegment(float CenterX, float CenterY, float InnerRadius, float OuterRadius, const vec2 &DirectionStart, const vec2 &DirectionEnd, float XDirection, float YDirection)
+{
+	const float InnerStartX = CenterX + XDirection * DirectionStart.x * InnerRadius;
+	const float InnerStartY = CenterY + YDirection * DirectionStart.y * InnerRadius;
+	const float OuterStartX = CenterX + XDirection * DirectionStart.x * OuterRadius;
+	const float OuterStartY = CenterY + YDirection * DirectionStart.y * OuterRadius;
+	const float OuterEndX = CenterX + XDirection * DirectionEnd.x * OuterRadius;
+	const float OuterEndY = CenterY + YDirection * DirectionEnd.y * OuterRadius;
+	const float InnerEndX = CenterX + XDirection * DirectionEnd.x * InnerRadius;
+	const float InnerEndY = CenterY + YDirection * DirectionEnd.y * InnerRadius;
+	return IGraphics::CFreeformItem(InnerStartX, InnerStartY, OuterStartX, OuterStartY, OuterEndX, OuterEndY, InnerEndX, InnerEndY);
+}
+
+
 
 static CVideoMode g_aFakeModes[] = {
 	{8192, 4320, 8192, 4320, 0}, {7680, 4320, 7680, 4320, 0}, {5120, 2880, 5120, 2880, 0},
@@ -406,6 +447,8 @@ static CCommandBuffer::SCommand_Texture_Create LoadTextureCreateCommand(int Text
 		Cmd.m_Flags |= TextureFlag::TO_3D_TEXTURE;
 	if((Flags & IGraphics::TEXLOAD_NO_2D_TEXTURE) != 0)
 		Cmd.m_Flags |= TextureFlag::NO_2D_TEXTURE;
+	if((Flags & IGraphics::TEXLOAD_NO_MIPMAPS) != 0)
+		Cmd.m_Flags |= TextureFlag::NO_MIPMAPS;
 
 	return Cmd;
 }
@@ -456,6 +499,21 @@ IGraphics::CTextureHandle CGraphics_Threaded::LoadTextureRawMove(CImageInfo &Ima
 	AddCmd(Cmd);
 
 	return TextureHandle;
+}
+
+bool CGraphics_Threaded::UpdateTextureRawMove(CTextureHandle Texture, CImageInfo &Image)
+{
+	if(!Texture.IsValid() || Texture.IsNullTexture() || !Image.m_pData || Image.m_Format != CImageInfo::FORMAT_RGBA || Image.m_Width == 0 || Image.m_Height == 0)
+		return false;
+	CCommandBuffer::SCommand_Texture_Update Cmd;
+	Cmd.m_Slot = Texture.Id();
+	Cmd.m_Width = Image.m_Width;
+	Cmd.m_Height = Image.m_Height;
+	Cmd.m_pData = Image.m_pData;
+	Image.m_pData = nullptr;
+	Image.Free();
+	AddCmd(Cmd);
+	return true;
 }
 
 IGraphics::CTextureHandle CGraphics_Threaded::LoadTexture(const char *pFilename, int StorageType, int Flags)
@@ -1300,6 +1358,7 @@ int CGraphics_Threaded::CreateRectQuadContainer(float x, float y, float w, float
 
 void CGraphics_Threaded::DrawRect(float x, float y, float w, float h, ColorRGBA Color, int Corners, float Rounding)
 {
+	if(Rounding >= 1.0f && DrawUiGlass(x, y, w, h, Color, Corners, Rounding)) return;
 	TextureClear();
 	QuadsBegin();
 	SetColor(Color);
@@ -2207,12 +2266,18 @@ int CGraphics_Threaded::IssueInit()
 		Flags |= IGraphicsBackend::INITFLAG_VSYNC;
 	}
 
-	const int Result = m_pBackend->Init("TClient", &g_Config.m_GfxScreen, &g_Config.m_GfxScreenWidth, &g_Config.m_GfxScreenHeight, &g_Config.m_GfxScreenRefreshRate, &g_Config.m_GfxFsaaSamples, Flags, &m_DesktopSize.x, &m_DesktopSize.y, &m_ScreenWidth, &m_ScreenHeight, m_pStorage);
+	const int Result = m_pBackend->Init("Xyrion client", &g_Config.m_GfxScreen, &g_Config.m_GfxScreenWidth, &g_Config.m_GfxScreenHeight, &g_Config.m_GfxScreenRefreshRate, &g_Config.m_GfxFsaaSamples, Flags, &m_DesktopSize.x, &m_DesktopSize.y, &m_ScreenWidth, &m_ScreenHeight, m_pStorage);
 	m_DrawableWidth = m_ScreenWidth;
 	m_DrawableHeight = m_ScreenHeight;
 	AddBackEndWarningIfExists();
 	if(Result == 0)
 	{
+		m_GLRenderTargetsSupported = m_pBackend->HasRenderTargets();
+		m_GLRenderTargetGaussianBlurSupported = m_pBackend->HasRenderTargetGaussianBlur();
+		m_GLBackbufferCaptureSupported = m_pBackend->HasBackbufferCapture();
+		m_GLRenderTargetExternalPassRequiresSingleSample = m_pBackend->RenderTargetExternalPassRequiresSingleSample();
+		m_MultiSamplingCount = (uint32_t)std::max(g_Config.m_GfxFsaaSamples, 0);
+		++m_GraphicsResourcesResetVersion;
 		m_GLUseTrianglesAsQuad = m_pBackend->UseTrianglesAsQuad();
 		m_GLTileBufferingEnabled = m_pBackend->HasTileBuffering();
 		m_GLQuadBufferingEnabled = m_pBackend->HasQuadBuffering();
@@ -2228,13 +2293,35 @@ int CGraphics_Threaded::IssueInit()
 
 // TClient
 bool g_GraphicsForcedAspect = true;
-void CGraphics_Threaded::SetForcedAspect(bool Force)
+static int s_GraphicsCustomAspect = -1;
+
+static void ResolveCustomAspect(bool ApplyCustomAspect, int &CustomAspect, float &CustomAspectF)
+{
+	CustomAspect = 0;
+	CustomAspectF = 0.0f;
+	if(!ApplyCustomAspect)
+		return;
+	const int AspectMode = g_Config.m_BcCustomAspectRatioMode >= 0 ? g_Config.m_BcCustomAspectRatioMode : (g_Config.m_BcCustomAspectRatio > 0 ? 1 : 0);
+	if(AspectMode <= 0 || g_Config.m_BcCustomAspectRatio < 100)
+		return;
+	CustomAspect = g_Config.m_BcCustomAspectRatio;
+	if(AspectMode == 2 && g_Config.m_BcCustomAspectRatioNum > 0 && g_Config.m_BcCustomAspectRatioDen > 0)
+		CustomAspectF = (float)g_Config.m_BcCustomAspectRatioNum / (float)g_Config.m_BcCustomAspectRatioDen;
+	else
+		CustomAspectF = CustomAspect / 100.0f;
+}
+
+void CGraphics_Threaded::SetForcedAspect(bool Force, bool ApplyCustomAspect)
 {
 	if(!IsBackendInitialized())
 		return;
-	if(g_GraphicsForcedAspect == Force)
+	int CustomAspect; float CustomAspectF;
+	ResolveCustomAspect(ApplyCustomAspect, CustomAspect, CustomAspectF);
+	if(g_GraphicsForcedAspect == Force && s_GraphicsCustomAspect == CustomAspect && m_ScreenAspectOverride == CustomAspectF)
 		return;
 	g_GraphicsForcedAspect = Force;
+	s_GraphicsCustomAspect = CustomAspect;
+	m_ScreenAspectOverride = CustomAspectF;
 	m_pBackend->GetViewportSize(m_ScreenWidth, m_ScreenHeight);
 	AdjustViewport(false);
 	UpdateViewport(m_ViewportX, 0, m_ScreenWidth, m_ScreenHeight, false);
@@ -2257,7 +2344,11 @@ void CGraphics_Threaded::AdjustViewport(bool SendViewportChangeToBackend)
 
 	// adjust the viewport to only allow certain aspect ratios
 	// keep this in sync with backend_vulkan GetSwapImageSize's check
-	if(m_ScreenHeight > 4 * m_ScreenWidth / 5 && g_GraphicsForcedAspect)
+	if(s_GraphicsCustomAspect >= 100)
+	{
+		m_IsForcedViewport = false;
+	}
+	else if(m_ScreenHeight > 4 * m_ScreenWidth / 5 && g_GraphicsForcedAspect)
 	{
 		m_IsForcedViewport = true;
 		m_ScreenHeight = 4 * m_ScreenWidth / 5;
@@ -2284,6 +2375,35 @@ void CGraphics_Threaded::UpdateViewport(int X, int Y, int W, int H, bool ByResiz
 	Cmd.m_DrawableHeight = m_DrawableHeight;
 	Cmd.m_ByResize = ByResize;
 	AddCmd(Cmd);
+}
+
+void CGraphics_Threaded::PushPreviewViewport(int X, int Y, int W, int H)
+{
+	dbg_assert(m_PreviewAspect == 0.0f && W > 0 && H > 0, "invalid preview viewport");
+	m_PreviewAspect = (float)W / H;
+	UpdateViewport(X, Y, W, H, false);
+}
+
+void CGraphics_Threaded::PopPreviewViewport()
+{
+	m_PreviewAspect = 0.0f;
+	UpdateViewport(m_ViewportX, 0, m_ScreenWidth, m_ScreenHeight, false);
+}
+
+bool CGraphics_Threaded::DrawUiGlass(float x, float y, float w, float h, ColorRGBA Color, int Corners, float Rounding)
+{
+	if(!g_Config.m_XcGlobalGlass || m_PreviewAspect > 0.0f || Color.a < 0.08f || w < 12.0f || h < 7.0f || !m_pBackend->SupportsUiGlass()) return false;
+	CCommandBuffer::SCommand_UiGlass Cmd;
+	Cmd.m_State = m_State;
+	Cmd.m_X = x; Cmd.m_Y = y; Cmd.m_W = w; Cmd.m_H = h;
+	Cmd.m_Radius = Rounding;
+	Cmd.m_Opacity = std::clamp(g_Config.m_XcGlassOpacity / 100.0f, 0.0f, 1.0f);
+	Cmd.m_Corners = Corners;
+	Cmd.m_Color = Color;
+	Cmd.m_GlassColor = color_cast<ColorRGBA>(ColorHSLA(g_Config.m_XcGlassColor));
+	Cmd.m_Frame = m_GlassFrame;
+	AddCmd(Cmd);
+	return true;
 }
 
 void CGraphics_Threaded::AddBackEndWarningIfExists()
@@ -2832,6 +2952,7 @@ void CGraphics_Threaded::ReadFramebuffer(CImageInfo &Image)
 
 void CGraphics_Threaded::Swap()
 {
+	++m_GlassFrame;
 #if defined(CONF_PLATFORM_IOS)
 	// Rotating the device by 180 degrees moves the cutout to the other side without
 	// changing the window size, which would not cause a resize event.
@@ -2999,4 +3120,660 @@ void CGraphics_Threaded::GetCurrentVideoMode(CVideoMode &CurMode, int Screen)
 extern IEngineGraphics *CreateEngineGraphicsThreaded()
 {
 	return new CGraphics_Threaded();
+}
+
+
+bool CGraphics_Threaded::IsRenderTargetSupported() const
+{
+	return m_GLRenderTargetsSupported;
+}
+
+bool CGraphics_Threaded::IsRenderTargetGaussianBlurSupported() const
+{
+	return IGraphics::SingleSampleFeatureAllowedUnderMsaa(m_GLRenderTargetGaussianBlurSupported, m_GLRenderTargetExternalPassRequiresSingleSample, m_MultiSamplingCount);
+}
+
+bool CGraphics_Threaded::IsBackbufferCaptureSupported() const
+{
+	return IGraphics::SingleSampleFeatureAllowedUnderMsaa(m_GLBackbufferCaptureSupported, m_GLRenderTargetExternalPassRequiresSingleSample, m_MultiSamplingCount);
+}
+
+const char *CGraphics_Threaded::RenderTargetSupportReason() const
+{
+	if(m_GLRenderTargetsSupported)
+		return "supported";
+	if(m_pBackend != nullptr)
+		return m_pBackend->RenderTargetSupportReason();
+	return "backend_not_initialized";
+}
+
+IGraphics::CRenderTargetHandle CGraphics_Threaded::CreateRenderTarget(int Width, int Height)
+{
+	if(!IsRenderTargetSupported() || Width <= 0 || Height <= 0)
+		return CRenderTargetHandle();
+
+	const size_t CurSize = m_vRenderTargetIndices.size();
+	if(m_FirstFreeRenderTarget == CurSize)
+	{
+		const size_t NewSize = CurSize == 0 ? 16 : CurSize * 2;
+		m_vRenderTargetIndices.resize(NewSize);
+		m_vRenderTargetSizes.resize(NewSize);
+		for(size_t Index = CurSize; Index < NewSize; ++Index)
+			m_vRenderTargetIndices[Index] = Index + 1;
+	}
+
+	const size_t TargetId = m_FirstFreeRenderTarget;
+	m_FirstFreeRenderTarget = m_vRenderTargetIndices[TargetId];
+	m_vRenderTargetIndices[TargetId] = -1;
+	m_vRenderTargetSizes[TargetId] = ivec2(Width, Height);
+
+	CCommandBuffer::SCommand_RenderTarget_Create Cmd;
+	Cmd.m_TargetId = TargetId;
+	Cmd.m_Width = Width;
+	Cmd.m_Height = Height;
+	AddCmd(Cmd);
+
+	return CreateRenderTargetHandle(TargetId);
+}
+
+void CGraphics_Threaded::DestroyRenderTarget(CRenderTargetHandle *pTarget)
+{
+	if(!pTarget || !pTarget->IsValid())
+		return;
+	const size_t TargetId = pTarget->Id();
+	if(TargetId >= m_vRenderTargetIndices.size() || m_vRenderTargetIndices[TargetId] != -1)
+	{
+		pTarget->Invalidate();
+		return;
+	}
+
+	CCommandBuffer::SCommand_RenderTarget_Destroy Cmd;
+	Cmd.m_TargetId = TargetId;
+	AddCmd(Cmd);
+
+	m_vRenderTargetIndices[TargetId] = m_FirstFreeRenderTarget;
+	m_vRenderTargetSizes[TargetId] = ivec2(0, 0);
+	m_FirstFreeRenderTarget = TargetId;
+	pTarget->Invalidate();
+}
+
+bool CGraphics_Threaded::BeginRenderTarget(CRenderTargetHandle Target, ColorRGBA ClearColor)
+{
+	if(!IsRenderTargetSupported() || m_RenderTargetActive || !Target.IsValid())
+		return false;
+	const size_t TargetId = Target.Id();
+	if(TargetId >= m_vRenderTargetIndices.size() || m_vRenderTargetIndices[TargetId] != -1)
+		return false;
+
+	FlushVertices();
+	m_RenderTargetSavedState = m_State;
+	m_State.m_ClipEnable = false;
+	CCommandBuffer::SCommand_RenderTarget_Begin Cmd;
+	Cmd.m_TargetId = TargetId;
+	Cmd.m_ClearColor.r = ClearColor.r;
+	Cmd.m_ClearColor.g = ClearColor.g;
+	Cmd.m_ClearColor.b = ClearColor.b;
+	Cmd.m_ClearColor.a = ClearColor.a;
+	Cmd.m_State = m_State;
+	Cmd.m_State.m_ClipEnable = false;
+	AddCmd(Cmd);
+	m_RenderTargetActive = true;
+	return true;
+}
+
+void CGraphics_Threaded::EndRenderTarget()
+{
+	if(!IsRenderTargetSupported() || !m_RenderTargetActive)
+		return;
+	FlushVertices();
+	m_State = m_RenderTargetSavedState;
+	CCommandBuffer::SCommand_RenderTarget_End Cmd;
+	Cmd.m_State = m_State;
+	AddCmd(Cmd);
+	m_RenderTargetActive = false;
+}
+
+void CGraphics_Threaded::DrawRenderTarget(CRenderTargetHandle Target, const SRenderTargetDrawParams &Params)
+{
+	if(!IsRenderTargetSupported() || !Target.IsValid() || Params.m_W <= 0.0f || Params.m_H <= 0.0f)
+		return;
+	const size_t TargetId = Target.Id();
+	if(TargetId >= m_vRenderTargetIndices.size() || m_vRenderTargetIndices[TargetId] != -1)
+		return;
+
+	FlushVertices();
+	CCommandBuffer::SCommand_RenderTarget_Draw Cmd;
+	Cmd.m_TargetId = TargetId;
+	Cmd.m_X = Params.m_X;
+	Cmd.m_Y = Params.m_Y;
+	Cmd.m_W = Params.m_W;
+	Cmd.m_H = Params.m_H;
+	Cmd.m_Alpha = std::clamp(Params.m_Alpha, 0.0f, 1.0f);
+	Cmd.m_State = m_State;
+	Cmd.m_State.m_WrapMode = EWrapMode::CLAMP;
+	if(Params.m_Opaque)
+		Cmd.m_State.m_BlendMode = EBlendMode::NONE;
+
+	// 四角每角至多 NumSegments / 2 个四边形，另有中心和四条边。
+	static_assert(RECT_CORNER_SEGMENTS >= 2 && RECT_CORNER_SEGMENTS % 2 == 0);
+	constexpr size_t MaxVertices = (RECT_CORNER_SEGMENTS / 2 * 4 + 9) * 4;
+	CCommandBuffer::SVertex aVertices[MaxVertices];
+	size_t NumVertices = 0;
+	const float InvW = 1.0f / Params.m_W;
+	const float InvH = 1.0f / Params.m_H;
+	const uint8_t Alpha = (uint8_t)(Cmd.m_Alpha * 255.0f + 0.5f);
+	auto AddQuad = [&](vec2 Point0, vec2 Point1, vec2 Point2, vec2 Point3) {
+		dbg_assert(NumVertices + 4 <= MaxVertices, "render target vertex capacity exceeded");
+		const vec2 aPositions[] = {Point0, Point1, Point2, Point3};
+		for(const vec2 Position : aPositions)
+		{
+			CCommandBuffer::SVertex Vertex{};
+			Vertex.m_Pos = Position;
+			const float LocalU = (Position.x - Params.m_X) * InvW;
+			const float LocalV = (Position.y - Params.m_Y) * InvH;
+			Vertex.m_Tex = vec2(mix(Params.m_U0, Params.m_U1, LocalU), mix(Params.m_V0, Params.m_V1, LocalV));
+			Vertex.m_Color = CCommandBuffer::SColor{255, 255, 255, Alpha};
+			aVertices[NumVertices++] = Vertex;
+		}
+	};
+
+	const float Rounding = std::clamp(Params.m_Rounding, 0.0f, std::min(Params.m_W, Params.m_H) * 0.5f);
+	if(Params.m_Corners == CORNER_NONE || Rounding <= 0.0f)
+	{
+		AddQuad(
+			vec2(Params.m_X, Params.m_Y),
+			vec2(Params.m_X + Params.m_W, Params.m_Y),
+			vec2(Params.m_X + Params.m_W, Params.m_Y + Params.m_H),
+			vec2(Params.m_X, Params.m_Y + Params.m_H));
+	}
+	else
+	{
+		constexpr int NumSegments = RECT_CORNER_SEGMENTS;
+		const vec2 *pDirections = m_RoundedRectDirections.Get(NumSegments);
+		for(int i = 0; i < NumSegments; i += 2)
+		{
+			const float Ca1 = pDirections[i].x;
+			const float Ca2 = pDirections[i + 1].x;
+			const float Ca3 = pDirections[i + 2].x;
+			const float Sa1 = pDirections[i].y;
+			const float Sa2 = pDirections[i + 1].y;
+			const float Sa3 = pDirections[i + 2].y;
+			if(Params.m_Corners & CORNER_TL)
+				AddQuad(
+					vec2(Params.m_X + Rounding, Params.m_Y + Rounding),
+					vec2(Params.m_X + (1.0f - Ca1) * Rounding, Params.m_Y + (1.0f - Sa1) * Rounding),
+					vec2(Params.m_X + (1.0f - Ca2) * Rounding, Params.m_Y + (1.0f - Sa2) * Rounding),
+					vec2(Params.m_X + (1.0f - Ca3) * Rounding, Params.m_Y + (1.0f - Sa3) * Rounding));
+			if(Params.m_Corners & CORNER_TR)
+				AddQuad(
+					vec2(Params.m_X + Params.m_W - Rounding, Params.m_Y + Rounding),
+					vec2(Params.m_X + Params.m_W - Rounding + Ca1 * Rounding, Params.m_Y + (1.0f - Sa1) * Rounding),
+					vec2(Params.m_X + Params.m_W - Rounding + Ca2 * Rounding, Params.m_Y + (1.0f - Sa2) * Rounding),
+					vec2(Params.m_X + Params.m_W - Rounding + Ca3 * Rounding, Params.m_Y + (1.0f - Sa3) * Rounding));
+			if(Params.m_Corners & CORNER_BL)
+				AddQuad(
+					vec2(Params.m_X + Rounding, Params.m_Y + Params.m_H - Rounding),
+					vec2(Params.m_X + (1.0f - Ca1) * Rounding, Params.m_Y + Params.m_H - Rounding + Sa1 * Rounding),
+					vec2(Params.m_X + (1.0f - Ca2) * Rounding, Params.m_Y + Params.m_H - Rounding + Sa2 * Rounding),
+					vec2(Params.m_X + (1.0f - Ca3) * Rounding, Params.m_Y + Params.m_H - Rounding + Sa3 * Rounding));
+			if(Params.m_Corners & CORNER_BR)
+				AddQuad(
+					vec2(Params.m_X + Params.m_W - Rounding, Params.m_Y + Params.m_H - Rounding),
+					vec2(Params.m_X + Params.m_W - Rounding + Ca1 * Rounding, Params.m_Y + Params.m_H - Rounding + Sa1 * Rounding),
+					vec2(Params.m_X + Params.m_W - Rounding + Ca2 * Rounding, Params.m_Y + Params.m_H - Rounding + Sa2 * Rounding),
+					vec2(Params.m_X + Params.m_W - Rounding + Ca3 * Rounding, Params.m_Y + Params.m_H - Rounding + Sa3 * Rounding));
+		}
+
+		AddQuad(
+			vec2(Params.m_X + Rounding, Params.m_Y + Rounding),
+			vec2(Params.m_X + Params.m_W - Rounding, Params.m_Y + Rounding),
+			vec2(Params.m_X + Params.m_W - Rounding, Params.m_Y + Params.m_H - Rounding),
+			vec2(Params.m_X + Rounding, Params.m_Y + Params.m_H - Rounding));
+		AddQuad(
+			vec2(Params.m_X + Rounding, Params.m_Y),
+			vec2(Params.m_X + Params.m_W - Rounding, Params.m_Y),
+			vec2(Params.m_X + Params.m_W - Rounding, Params.m_Y + Rounding),
+			vec2(Params.m_X + Rounding, Params.m_Y + Rounding));
+		AddQuad(
+			vec2(Params.m_X + Rounding, Params.m_Y + Params.m_H - Rounding),
+			vec2(Params.m_X + Params.m_W - Rounding, Params.m_Y + Params.m_H - Rounding),
+			vec2(Params.m_X + Params.m_W - Rounding, Params.m_Y + Params.m_H),
+			vec2(Params.m_X + Rounding, Params.m_Y + Params.m_H));
+		AddQuad(
+			vec2(Params.m_X, Params.m_Y + Rounding),
+			vec2(Params.m_X + Rounding, Params.m_Y + Rounding),
+			vec2(Params.m_X + Rounding, Params.m_Y + Params.m_H - Rounding),
+			vec2(Params.m_X, Params.m_Y + Params.m_H - Rounding));
+		AddQuad(
+			vec2(Params.m_X + Params.m_W - Rounding, Params.m_Y + Rounding),
+			vec2(Params.m_X + Params.m_W, Params.m_Y + Rounding),
+			vec2(Params.m_X + Params.m_W, Params.m_Y + Params.m_H - Rounding),
+			vec2(Params.m_X + Params.m_W - Rounding, Params.m_Y + Params.m_H - Rounding));
+		if(!(Params.m_Corners & CORNER_TL))
+			AddQuad(vec2(Params.m_X, Params.m_Y), vec2(Params.m_X + Rounding, Params.m_Y), vec2(Params.m_X + Rounding, Params.m_Y + Rounding), vec2(Params.m_X, Params.m_Y + Rounding));
+		if(!(Params.m_Corners & CORNER_TR))
+			AddQuad(vec2(Params.m_X + Params.m_W - Rounding, Params.m_Y), vec2(Params.m_X + Params.m_W, Params.m_Y), vec2(Params.m_X + Params.m_W, Params.m_Y + Rounding), vec2(Params.m_X + Params.m_W - Rounding, Params.m_Y + Rounding));
+		if(!(Params.m_Corners & CORNER_BL))
+			AddQuad(vec2(Params.m_X, Params.m_Y + Params.m_H - Rounding), vec2(Params.m_X + Rounding, Params.m_Y + Params.m_H - Rounding), vec2(Params.m_X + Rounding, Params.m_Y + Params.m_H), vec2(Params.m_X, Params.m_Y + Params.m_H));
+		if(!(Params.m_Corners & CORNER_BR))
+			AddQuad(vec2(Params.m_X + Params.m_W - Rounding, Params.m_Y + Params.m_H - Rounding), vec2(Params.m_X + Params.m_W, Params.m_Y + Params.m_H - Rounding), vec2(Params.m_X + Params.m_W, Params.m_Y + Params.m_H), vec2(Params.m_X + Params.m_W - Rounding, Params.m_Y + Params.m_H));
+	}
+
+	Cmd.m_PrimCount = NumVertices / 4;
+	if(Cmd.m_PrimCount == 0)
+		return;
+	const size_t VerticesSize = NumVertices * sizeof(CCommandBuffer::SVertex);
+	Cmd.m_pVertices = (CCommandBuffer::SVertex *)AllocCommandBufferData(VerticesSize);
+	mem_copy(Cmd.m_pVertices, aVertices, VerticesSize);
+	AddCmd(Cmd, [&] {
+		Cmd.m_pVertices = (CCommandBuffer::SVertex *)m_pCommandBuffer->AllocData(VerticesSize);
+		if(Cmd.m_pVertices == nullptr)
+			return false;
+		mem_copy(Cmd.m_pVertices, aVertices, VerticesSize);
+		return true;
+	});
+}
+
+bool CGraphics_Threaded::CaptureBackbufferToRenderTarget(CRenderTargetHandle Target)
+{
+	if(!IsBackbufferCaptureSupported() || m_RenderTargetActive || !Target.IsValid())
+		return false;
+	const size_t TargetId = Target.Id();
+	if(TargetId >= m_vRenderTargetIndices.size() || m_vRenderTargetIndices[TargetId] != -1)
+		return false;
+
+	FlushVertices();
+	CCommandBuffer::SCommand_RenderTarget_CaptureBackbuffer Cmd;
+	Cmd.m_TargetId = (int)TargetId;
+	AddCmd(Cmd);
+	return true;
+}
+
+bool CGraphics_Threaded::GaussianBlurRenderTarget(CRenderTargetHandle Source, const std::array<CRenderTargetHandle, DUAL_KAWASE_PYRAMID_LEVELS> &aTemporary, CRenderTargetHandle Destination, const SGaussianBlurParams &Params)
+{
+	const bool DualKawase = Params.m_Mode == EBlurMode::DUAL;
+	const int TemporaryCount = DualKawase ? DUAL_KAWASE_PYRAMID_LEVELS : 1;
+	if(!IsRenderTargetGaussianBlurSupported() || !Source.IsValid() || !Destination.IsValid())
+		return false;
+	int MaxTargetId = std::max(Source.Id(), Destination.Id());
+	for(int Index = 0; Index < TemporaryCount; ++Index)
+	{
+		if(!aTemporary[Index].IsValid() || aTemporary[Index].Id() == Source.Id() || aTemporary[Index].Id() == Destination.Id())
+			return false;
+		for(int Previous = 0; Previous < Index; ++Previous)
+			if(aTemporary[Index].Id() == aTemporary[Previous].Id())
+				return false;
+		MaxTargetId = std::max(MaxTargetId, aTemporary[Index].Id());
+	}
+	if((size_t)MaxTargetId >= m_vRenderTargetIndices.size() || (size_t)MaxTargetId >= m_vRenderTargetSizes.size())
+		return false;
+	if(m_vRenderTargetIndices[Source.Id()] != -1 || m_vRenderTargetIndices[Destination.Id()] != -1)
+		return false;
+	const ivec2 Size = m_vRenderTargetSizes[Source.Id()];
+	const ivec2 DestinationSize = m_vRenderTargetSizes[Destination.Id()];
+	if(Size.x <= 0 || Size.y <= 0 || DestinationSize != Size)
+		return false;
+	ivec2 PreviousExpectedSize = Size;
+	for(int Index = 0; Index < TemporaryCount; ++Index)
+	{
+		if(m_vRenderTargetIndices[aTemporary[Index].Id()] != -1)
+			return false;
+		const ivec2 ExpectedSize = DualKawase ? ivec2(DualKawasePyramidDimension(Size.x, Index), DualKawasePyramidDimension(Size.y, Index)) : Size;
+		if(ExpectedSize.x <= 0 || ExpectedSize.y <= 0 || (DualKawase && (ExpectedSize.x >= PreviousExpectedSize.x || ExpectedSize.y >= PreviousExpectedSize.y)) || m_vRenderTargetSizes[aTemporary[Index].Id()] != ExpectedSize)
+			return false;
+		PreviousExpectedSize = ExpectedSize;
+	}
+
+	std::array<float, GAUSSIAN_BLUR_MAX_RADIUS + 1> aWeights{};
+	if(Params.m_Mode == EBlurMode::GAUSSIAN && !CalculateGaussianBlurKernel(Params, aWeights))
+		return false;
+
+	const auto AddBlurPass = [&](CRenderTargetHandle PassSource, CRenderTargetHandle PassDestination, int Pass, bool Horizontal, bool Upsample) {
+		if(!BeginRenderTarget(PassDestination, ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f)))
+			return false;
+		CCommandBuffer::SCommand_RenderTarget_GaussianBlurPass Command;
+		Command.m_SourceTargetId = PassSource.Id();
+		Command.m_Radius = Params.m_Radius;
+		Command.m_Horizontal = Horizontal;
+		Command.m_Mode = Params.m_Mode;
+		Command.m_Pass = Pass;
+		Command.m_Upsample = Upsample;
+		Command.m_aWeights = aWeights;
+		AddCmd(Command);
+		EndRenderTarget();
+		return true;
+	};
+
+	if(!DualKawase)
+	{
+		if(!AddBlurPass(Source, aTemporary[0], 0, true, false))
+			return false;
+		return AddBlurPass(aTemporary[0], Destination, 1, false, false);
+	}
+
+	CRenderTargetHandle PassSource = Source;
+	for(int Level = 0; Level < DUAL_KAWASE_PYRAMID_LEVELS; ++Level)
+	{
+		if(!AddBlurPass(PassSource, aTemporary[Level], 0, false, false))
+			return false;
+		PassSource = aTemporary[Level];
+	}
+	for(int Level = DUAL_KAWASE_PYRAMID_LEVELS - 1; Level >= 0; --Level)
+	{
+		const CRenderTargetHandle PassDestination = Level == 0 ? Destination : aTemporary[Level - 1];
+		if(!AddBlurPass(aTemporary[Level], PassDestination, 1, false, true))
+			return false;
+	}
+	return true;
+}
+
+bool CGraphics_Threaded::DualBlurRenderTarget(CRenderTargetHandle Source, CRenderTargetHandle Downsample, CRenderTargetHandle DownsampleTemporary, CRenderTargetHandle DownsampleBlurred, CRenderTargetHandle Destination, const SGaussianBlurParams &Params)
+{
+	if(!IsRenderTargetGaussianBlurSupported() || !Source.IsValid() || !Downsample.IsValid() || !DownsampleTemporary.IsValid() || !DownsampleBlurred.IsValid() || !Destination.IsValid())
+		return false;
+	const std::array<CRenderTargetHandle, 5> aTargets = {Source, Downsample, DownsampleTemporary, DownsampleBlurred, Destination};
+	for(size_t i = 0; i < aTargets.size(); ++i)
+	{
+		for(size_t j = i + 1; j < aTargets.size(); ++j)
+		{
+			if(aTargets[i].Id() == aTargets[j].Id())
+				return false;
+		}
+	}
+	const size_t MaxTargetId = (size_t)std::max({Source.Id(), Downsample.Id(), DownsampleTemporary.Id(), DownsampleBlurred.Id(), Destination.Id()});
+	if(MaxTargetId >= m_vRenderTargetIndices.size() || MaxTargetId >= m_vRenderTargetSizes.size())
+		return false;
+	for(const CRenderTargetHandle Target : aTargets)
+	{
+		if(m_vRenderTargetIndices[Target.Id()] != -1)
+			return false;
+	}
+	const ivec2 SourceSize = m_vRenderTargetSizes[Source.Id()];
+	const ivec2 DownsampleSize = m_vRenderTargetSizes[Downsample.Id()];
+	if(SourceSize.x <= 0 || SourceSize.y <= 0 || DownsampleSize.x <= 0 || DownsampleSize.y <= 0 ||
+		m_vRenderTargetSizes[DownsampleTemporary.Id()] != DownsampleSize || m_vRenderTargetSizes[DownsampleBlurred.Id()] != DownsampleSize ||
+		m_vRenderTargetSizes[Destination.Id()] != SourceSize || DownsampleSize.x > SourceSize.x || DownsampleSize.y > SourceSize.y)
+		return false;
+
+	const CCommandBuffer::SPoint SavedScreenTL = m_State.m_ScreenTL;
+	const CCommandBuffer::SPoint SavedScreenBR = m_State.m_ScreenBR;
+	const auto RestoreScreen = [&]() {
+		MapScreen(CScreenRect(SavedScreenTL.x, SavedScreenTL.y, SavedScreenBR.x - SavedScreenTL.x, SavedScreenBR.y - SavedScreenTL.y));
+	};
+
+	// 普通渲染目标绘制使用线性过滤，因此无需新增 shader 即可完成低成本降采样和柔和升采样。
+	if(!BeginRenderTarget(Downsample, ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f)))
+		return false;
+	MapScreen(CScreenRect(0.0f, 0.0f, (float)DownsampleSize.x, (float)DownsampleSize.y));
+	SRenderTargetDrawParams DownsampleParams;
+	DownsampleParams.m_W = (float)DownsampleSize.x;
+	DownsampleParams.m_H = (float)DownsampleSize.y;
+	DrawRenderTarget(Source, DownsampleParams);
+	EndRenderTarget();
+	RestoreScreen();
+
+	std::array<CRenderTargetHandle, DUAL_KAWASE_PYRAMID_LEVELS> aDualBlurTemporary{};
+	aDualBlurTemporary[0] = DownsampleTemporary;
+	if(!GaussianBlurRenderTarget(Downsample, aDualBlurTemporary, DownsampleBlurred, Params))
+		return false;
+
+	if(!BeginRenderTarget(Destination, ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f)))
+		return false;
+	MapScreen(CScreenRect(0.0f, 0.0f, (float)SourceSize.x, (float)SourceSize.y));
+	SRenderTargetDrawParams UpsampleParams;
+	UpsampleParams.m_W = (float)SourceSize.x;
+	UpsampleParams.m_H = (float)SourceSize.y;
+	DrawRenderTarget(DownsampleBlurred, UpsampleParams);
+	EndRenderTarget();
+	RestoreScreen();
+	return true;
+}
+
+void CGraphics_Threaded::RenderMediaIslandSdf(const IGraphics::SMediaIslandSdfParams &Params, CRenderTargetHandle Backdrop)
+{
+	const vec4 Rect = Params.m_aData[IGraphics::SMediaIslandSdfParams::DATA_RECT];
+	if(Rect.z <= 0.0f || Rect.w <= 0.0f)
+		return;
+
+	// Finish any pending regular vertices before inserting the dedicated SDF
+	// draw, so command order remains identical to the immediate-mode API.
+	if(m_NumVertices > 0)
+		FlushVertices();
+
+	CCommandBuffer::SCommand_RenderMediaIslandSdf Cmd;
+	Cmd.m_State = m_State;
+	Cmd.m_State.m_BlendMode = EBlendMode::ALPHA;
+	Cmd.m_State.m_WrapMode = EWrapMode::CLAMP;
+	Cmd.m_State.m_Texture = m_NullTexture.Id();
+	Cmd.m_Params = Params;
+	if(Backdrop.IsValid() && (size_t)Backdrop.Id() < m_vRenderTargetIndices.size() && m_vRenderTargetIndices[Backdrop.Id()] == -1)
+		Cmd.m_BackdropTargetId = Backdrop.Id();
+	else
+		Cmd.m_Params.m_aData[IGraphics::SMediaIslandSdfParams::DATA_BACKDROP_UV] = vec4();
+
+	CCommandBuffer::SVertex aVertices[4]{};
+	aVertices[0].m_Pos = vec2(Rect.x, Rect.y);
+	aVertices[1].m_Pos = vec2(Rect.x + Rect.z, Rect.y);
+	aVertices[2].m_Pos = vec2(Rect.x + Rect.z, Rect.y + Rect.w);
+	aVertices[3].m_Pos = vec2(Rect.x, Rect.y + Rect.w);
+	aVertices[0].m_Tex = vec2(0.0f, 0.0f);
+	aVertices[1].m_Tex = vec2(1.0f, 0.0f);
+	aVertices[2].m_Tex = vec2(1.0f, 1.0f);
+	aVertices[3].m_Tex = vec2(0.0f, 1.0f);
+	for(auto &Vertex : aVertices)
+		Vertex.m_Color = CCommandBuffer::SColor(255, 255, 255, 255);
+
+	Cmd.m_pVertices = (CCommandBuffer::SVertex *)AllocCommandBufferData(sizeof(aVertices));
+	AddCmd(Cmd, [&] {
+		Cmd.m_pVertices = (CCommandBuffer::SVertex *)m_pCommandBuffer->AllocData(sizeof(aVertices));
+		return Cmd.m_pVertices != nullptr;
+	});
+	mem_copy(Cmd.m_pVertices, aVertices, sizeof(aVertices));
+	m_pCommandBuffer->AddRenderCalls(1);
+}
+
+void CGraphics_Threaded::RenderRoundedRectSdf(const IGraphics::SRoundedRectSdfParams &Params)
+{
+	const vec4 Rect = Params.m_Rect;
+	if(Rect.z <= 0.0f || Rect.w <= 0.0f)
+		return;
+
+	if(m_NumVertices > 0)
+	{
+		FlushVertices();
+	}
+
+	CCommandBuffer::SCommand_RenderRoundedRectSdf Cmd;
+	Cmd.m_State = m_State;
+	Cmd.m_State.m_BlendMode = EBlendMode::ALPHA;
+	Cmd.m_State.m_Texture = -1;
+	Cmd.m_Params = Params;
+
+	const float Padding = std::max(0.0f, Params.m_Params.z);
+	CCommandBuffer::SVertex aVertices[4]{};
+	aVertices[0].m_Pos = vec2(Rect.x - Padding, Rect.y - Padding);
+	aVertices[1].m_Pos = vec2(Rect.x + Rect.z + Padding, Rect.y - Padding);
+	aVertices[2].m_Pos = vec2(Rect.x + Rect.z + Padding, Rect.y + Rect.w + Padding);
+	aVertices[3].m_Pos = vec2(Rect.x - Padding, Rect.y + Rect.w + Padding);
+	aVertices[0].m_Tex = vec2(0.0f, 0.0f);
+	aVertices[1].m_Tex = vec2(1.0f, 0.0f);
+	aVertices[2].m_Tex = vec2(1.0f, 1.0f);
+	aVertices[3].m_Tex = vec2(0.0f, 1.0f);
+	for(auto &Vertex : aVertices)
+		Vertex.m_Color = CCommandBuffer::SColor(255, 255, 255, 255);
+
+	Cmd.m_pVertices = (CCommandBuffer::SVertex *)AllocCommandBufferData(sizeof(aVertices));
+	AddCmd(Cmd, [&] {
+		Cmd.m_pVertices = (CCommandBuffer::SVertex *)m_pCommandBuffer->AllocData(sizeof(aVertices));
+		return Cmd.m_pVertices != nullptr;
+	});
+	mem_copy(Cmd.m_pVertices, aVertices, sizeof(aVertices));
+	m_pCommandBuffer->AddRenderCalls(1);
+}
+
+void CGraphics_Threaded::DrawRoundedRectAntialias(const float x, const float y, const float w, const float h, const float Radius, const int Corners, const ColorRGBA &Color)
+{
+	TextureClear();
+	QuadsBegin();
+	SetColor(Color);
+	DrawRectExtAntialias(x, y, w, h, Radius, Corners, Color);
+	QuadsEnd();
+}
+
+void CGraphics_Threaded::RenderProceduralRing(const IGraphics::SProceduralRingParams &Params)
+{
+	if(Params.m_RingInnerRadius < 0.0f || Params.m_RingOuterRadius <= Params.m_RingInnerRadius || Params.m_RingEndAngle <= Params.m_RingStartAngle || Params.m_Rect.z <= 0.0f || Params.m_Rect.w <= 0.0f || Params.m_Color.a <= 0.0f)
+		return;
+
+	if(m_NumVertices > 0)
+	{
+		FlushVertices();
+	}
+
+	CCommandBuffer::SCommand_RenderProceduralRing Cmd;
+	Cmd.m_State = m_State;
+	Cmd.m_State.m_BlendMode = EBlendMode::ALPHA;
+	Cmd.m_State.m_WrapMode = EWrapMode::CLAMP;
+	Cmd.m_State.m_Texture = -1;
+	Cmd.m_RingParams = vec4(Params.m_RingInnerRadius, Params.m_RingOuterRadius, Params.m_RingStartAngle, Params.m_RingEndAngle);
+
+	const float CenterX = Params.m_Rect.x + Params.m_Rect.z * 0.5f;
+	const float CenterY = Params.m_Rect.y + Params.m_Rect.w * 0.5f;
+	const float CosRotation = std::cos(Params.m_Rotation);
+	const float SinRotation = std::sin(Params.m_Rotation);
+	auto Rotate = [&](float X, float Y) {
+		const float OffsetX = X - CenterX;
+		const float OffsetY = Y - CenterY;
+		return vec2(OffsetX * CosRotation - OffsetY * SinRotation + CenterX, OffsetX * SinRotation + OffsetY * CosRotation + CenterY);
+	};
+
+	CCommandBuffer::SVertex aVertices[4]{};
+	aVertices[0].m_Pos = Rotate(Params.m_Rect.x, Params.m_Rect.y);
+	aVertices[1].m_Pos = Rotate(Params.m_Rect.x + Params.m_Rect.z, Params.m_Rect.y);
+	aVertices[2].m_Pos = Rotate(Params.m_Rect.x + Params.m_Rect.z, Params.m_Rect.y + Params.m_Rect.w);
+	aVertices[3].m_Pos = Rotate(Params.m_Rect.x, Params.m_Rect.y + Params.m_Rect.w);
+	const vec4 UvRect = vec4(0.0f, 0.0f, 1.0f, 1.0f);
+	aVertices[0].m_Tex = vec2(UvRect.x, UvRect.y);
+	aVertices[1].m_Tex = vec2(UvRect.z, UvRect.y);
+	aVertices[2].m_Tex = vec2(UvRect.z, UvRect.w);
+	aVertices[3].m_Tex = vec2(UvRect.x, UvRect.w);
+	const CCommandBuffer::SColor Color = ColorRGBAToCommandColor(Params.m_Color);
+	for(auto &Vertex : aVertices)
+		Vertex.m_Color = Color;
+
+	Cmd.m_pVertices = (CCommandBuffer::SVertex *)AllocCommandBufferData(sizeof(aVertices));
+	AddCmd(Cmd, [&] {
+		Cmd.m_pVertices = (CCommandBuffer::SVertex *)m_pCommandBuffer->AllocData(sizeof(aVertices));
+		return Cmd.m_pVertices != nullptr;
+	});
+	mem_copy(Cmd.m_pVertices, aVertices, sizeof(aVertices));
+	m_pCommandBuffer->AddRenderCalls(1);
+}
+
+float CGraphics_Threaded::RoundedRectAntialiasSize() const
+{
+	const float ScreenWidth = absolute(m_State.m_ScreenBR.x - m_State.m_ScreenTL.x);
+	const float ScreenHeight = absolute(m_State.m_ScreenBR.y - m_State.m_ScreenTL.y);
+	if(ScreenWidth <= 0.0f || ScreenHeight <= 0.0f || m_ScreenWidth <= 0 || m_ScreenHeight <= 0)
+		return 0.0f;
+	return std::max(ScreenWidth / (float)m_ScreenWidth, ScreenHeight / (float)m_ScreenHeight) * RECT_ANTIALIAS_PIXEL_SIZE;
+}
+
+void CGraphics_Threaded::DrawRectExtAntialias(float x, float y, float w, float h, float r, int Corners, ColorRGBA Color, bool ResolveGeometry)
+{
+	if(ResolveGeometry && Corners != 0 && r > 0.0f)
+	{
+		const SRoundedRectGeometry Geometry = ResolveRoundedRectGeometry(x, y, w, h, r, RoundedRectAntialiasSize() / RECT_ANTIALIAS_PIXEL_SIZE);
+		x = Geometry.m_X;
+		y = Geometry.m_Y;
+		w = Geometry.m_W;
+		h = Geometry.m_H;
+		r = Geometry.m_Rounding;
+	}
+	if(Corners == 0 || r <= 0.0f || Color.a <= 0.0f)
+		return;
+
+	const float AntialiasSize = std::min(RoundedRectAntialiasSize(), r);
+	if(AntialiasSize <= 0.0f)
+		return;
+
+	CCommandBuffer::SColor aOldColor[4];
+	std::copy(std::begin(m_aColor), std::end(m_aColor), std::begin(aOldColor));
+
+	const ColorRGBA TransparentColor = ColorWithAlpha(Color, 0.0f);
+	const float TopX = (Corners & CORNER_TL) ? x + r : x;
+	const float TopWidth = ((Corners & CORNER_TR) ? x + w - r : x + w) - TopX;
+	if(TopWidth > 0.0f && (Corners & CORNER_T))
+	{
+		SetColor4(TransparentColor, TransparentColor, Color, Color);
+		CQuadItem Quad(TopX, y - AntialiasSize, TopWidth, AntialiasSize);
+		QuadsDrawTL(&Quad, 1);
+	}
+
+	const float BottomX = (Corners & CORNER_BL) ? x + r : x;
+	const float BottomWidth = ((Corners & CORNER_BR) ? x + w - r : x + w) - BottomX;
+	if(BottomWidth > 0.0f && (Corners & CORNER_B))
+	{
+		SetColor4(Color, Color, TransparentColor, TransparentColor);
+		CQuadItem Quad(BottomX, y + h, BottomWidth, AntialiasSize);
+		QuadsDrawTL(&Quad, 1);
+	}
+
+	const float LeftY = (Corners & CORNER_TL) ? y + r : y;
+	const float LeftHeight = ((Corners & CORNER_BL) ? y + h - r : y + h) - LeftY;
+	if(LeftHeight > 0.0f && (Corners & CORNER_L))
+	{
+		SetColor4(TransparentColor, Color, TransparentColor, Color);
+		CQuadItem Quad(x - AntialiasSize, LeftY, AntialiasSize, LeftHeight);
+		QuadsDrawTL(&Quad, 1);
+	}
+
+	const float RightY = (Corners & CORNER_TR) ? y + r : y;
+	const float RightHeight = ((Corners & CORNER_BR) ? y + h - r : y + h) - RightY;
+	if(RightHeight > 0.0f && (Corners & CORNER_R))
+	{
+		SetColor4(Color, TransparentColor, Color, TransparentColor);
+		CQuadItem Quad(x + w, RightY, AntialiasSize, RightHeight);
+		QuadsDrawTL(&Quad, 1);
+	}
+
+	const float OuterRadius = r + AntialiasSize;
+	const int NumSegments = RoundedRectSegmentCount();
+	const vec2 *pDirections = m_RoundedRectDirections.Get(NumSegments);
+	IGraphics::CFreeformItem aFreeform[RECT_CORNER_SEGMENTS * 4];
+	size_t NumItems = 0;
+
+	for(int Segment = 0; Segment < NumSegments; ++Segment)
+	{
+		const vec2 &DirectionStart = pDirections[Segment];
+		const vec2 &DirectionEnd = pDirections[Segment + 1];
+
+		if(Corners & CORNER_TL)
+			aFreeform[NumItems++] = RoundedRectAntialiasSegment(x + r, y + r, r, OuterRadius, DirectionStart, DirectionEnd, -1.0f, -1.0f);
+		if(Corners & CORNER_TR)
+			aFreeform[NumItems++] = RoundedRectAntialiasSegment(x + w - r, y + r, r, OuterRadius, DirectionStart, DirectionEnd, 1.0f, -1.0f);
+		if(Corners & CORNER_BL)
+			aFreeform[NumItems++] = RoundedRectAntialiasSegment(x + r, y + h - r, r, OuterRadius, DirectionStart, DirectionEnd, -1.0f, 1.0f);
+		if(Corners & CORNER_BR)
+			aFreeform[NumItems++] = RoundedRectAntialiasSegment(x + w - r, y + h - r, r, OuterRadius, DirectionStart, DirectionEnd, 1.0f, 1.0f);
+	}
+
+	if(NumItems > 0)
+	{
+		SetColor4(Color, TransparentColor, Color, TransparentColor);
+		QuadsDrawFreeform(aFreeform, NumItems);
+	}
+
+	std::copy(std::begin(aOldColor), std::end(aOldColor), std::begin(m_aColor));
+}
+
+void CGraphics_Threaded::SetColorVertex(const CColorVertex *pArray, size_t Num)
+{
+	dbg_assert(m_Drawing != EDrawing::NONE, "called Graphics()->SetColorVertex without begin");
+
+	for(size_t i = 0; i < Num; ++i)
+	{
+		const CColorVertex &Vertex = pArray[i];
+		m_aColor[Vertex.m_Index] = NormalizeColor(ColorRGBA(Vertex.m_R, Vertex.m_G, Vertex.m_B, Vertex.m_A));
+	}
 }

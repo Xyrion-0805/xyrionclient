@@ -111,6 +111,13 @@ bool CServerInfo2::FromJsonRaw(CServerInfo2 *pOut, const json_value *pJson)
 	str_copy(pOut->m_aGameType, GameType);
 	str_copy(pOut->m_aName, Name);
 	str_copy(pOut->m_aMapName, MapName);
+	const json_value &MapSha = ServerInfo["map"]["sha256"];
+	pOut->m_HasMapSha256 = MapSha.type == json_string && sha256_from_str(&pOut->m_MapSha256, MapSha) == 0;
+	const json_value &MapSize = ServerInfo["map"]["size"];
+	pOut->m_MapSize = MapSize.type == json_integer && MapSize.u.integer > 0 && MapSize.u.integer <= 64 * 1024 * 1024 ? (int)MapSize.u.integer : 0;
+	const json_value &MapUrl = ServerInfo["map"]["url"];
+	pOut->m_aMapUrl[0] = '\0';
+	if(MapUrl.type == json_string && !str_has_cc(MapUrl) && str_startswith(MapUrl, "https://") && MapUrl.u.string.length < sizeof(pOut->m_aMapUrl)) str_copy(pOut->m_aMapUrl, MapUrl);
 	str_copy(pOut->m_aVersion, Version);
 
 	pOut->m_NumClients = 0;
@@ -249,6 +256,8 @@ bool CServerInfo2::operator==(const CServerInfo2 &Other) const
 	Unequal = Unequal || str_comp(m_aGameType, Other.m_aGameType) != 0;
 	Unequal = Unequal || str_comp(m_aName, Other.m_aName) != 0;
 	Unequal = Unequal || str_comp(m_aMapName, Other.m_aMapName) != 0;
+	Unequal = Unequal || m_HasMapSha256 != Other.m_HasMapSha256 || m_MapSize != Other.m_MapSize || str_comp(m_aMapUrl, Other.m_aMapUrl) != 0;
+	if(m_HasMapSha256 && Other.m_HasMapSha256) Unequal = Unequal || m_MapSha256 != Other.m_MapSha256;
 	Unequal = Unequal || str_comp(m_aVersion, Other.m_aVersion) != 0;
 	Unequal = Unequal || m_RequiresLogin != Other.m_RequiresLogin;
 	if(Unequal)
@@ -285,6 +294,10 @@ CServerInfo2::operator CServerInfo() const
 	str_copy(Result.m_aGameType, m_aGameType);
 	str_copy(Result.m_aName, m_aName);
 	str_copy(Result.m_aMap, m_aMapName);
+	Result.m_HasMapSha256 = m_HasMapSha256;
+	Result.m_MapSha256 = m_MapSha256;
+	Result.m_MapSize = m_MapSize;
+	str_copy(Result.m_aMapUrl, m_aMapUrl);
 	str_copy(Result.m_aVersion, m_aVersion);
 
 	Result.m_vClients.resize(std::min(m_NumClients, (int)SERVERINFO_MAX_CLIENTS));

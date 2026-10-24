@@ -116,6 +116,12 @@ public:
 
 struct SBackendCapabilities
 {
+	bool m_MediaIslandSdf = false;
+	bool m_RoundedRectSdf = false;
+	std::atomic<bool> m_ProceduralRing{false};
+	bool m_RenderTargets = false;
+	bool m_RenderTargetGaussianBlur = false;
+	bool m_BackbufferCapture = false;
 	bool m_TileBuffering;
 	bool m_QuadBuffering;
 	bool m_TextBuffering;
@@ -273,6 +279,13 @@ public:
 
 	bool GetDriverVersion(EGraphicsDriverAgeType DriverAgeType, int &Major, int &Minor, int &Patch, const char *&pName, EBackendType BackendType) override;
 	bool IsConfigModernAPI() override { return IsModernAPI(m_BackendType); }
+	bool HasMediaIslandSdf() override { return m_Capabilities.m_MediaIslandSdf; }
+	bool HasRoundedRectSdf() override { return m_Capabilities.m_RoundedRectSdf; }
+	bool HasProceduralRing() override { return m_Capabilities.m_ProceduralRing.load(std::memory_order_acquire); }
+	bool HasRenderTargets() override { return m_Capabilities.m_RenderTargets; }
+	bool HasRenderTargetGaussianBlur() override { return m_Capabilities.m_RenderTargetGaussianBlur; }
+	bool HasBackbufferCapture() override { return m_Capabilities.m_BackbufferCapture; }
+	bool SupportsUiGlass() override;
 	bool UseTrianglesAsQuad() override { return m_Capabilities.m_TrianglesAsQuads; }
 	bool HasTileBuffering() override { return m_Capabilities.m_TileBuffering; }
 	bool HasQuadBuffering() override { return m_Capabilities.m_QuadBuffering; }

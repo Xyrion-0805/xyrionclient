@@ -4,13 +4,14 @@
 #include <game/client/ui.h>
 #include <game/editor/editor.h>
 #include <game/editor/editor_ui.h>
+#include <game/editor/localization.h>
 
 void CEditor::UpdateTooltip(const void *pId, const CUIRect *pRect, const char *pToolTip)
 {
 	if(Ui()->MouseInside(pRect) && !pToolTip)
 		str_copy(m_aTooltip, "");
 	else if(Ui()->HotItem() == pId && pToolTip)
-		str_copy(m_aTooltip, pToolTip);
+		str_copy(m_aTooltip, EditorLocalize(pToolTip));
 }
 
 ColorRGBA CEditor::GetButtonColor(const void *pId, int Checked)
@@ -84,7 +85,7 @@ int CEditor::DoButton_Editor(const void *pId, const char *pText, int Checked, co
 {
 	pRect->Draw(GetButtonColor(pId, Checked), IGraphics::CORNER_ALL, 3.0f);
 	CUIRect NewRect = *pRect;
-	Ui()->DoLabel(&NewRect, pText, 10.0f, TEXTALIGN_MC);
+	Ui()->DoLabel(&NewRect, EditorLocalize(pText), 10.0f, TEXTALIGN_MC);
 	Checked %= 2;
 	return DoButtonLogic(pId, Checked, pRect, Flags, pToolTip);
 }
@@ -96,7 +97,7 @@ int CEditor::DoButton_Env(const void *pId, const char *pText, int Checked, const
 	ColorRGBA Color = ColorRGBA(BaseColor.r * Bright, BaseColor.g * Bright, BaseColor.b * Bright, Alpha);
 
 	pRect->Draw(Color, Corners, 3.0f);
-	Ui()->DoLabel(pRect, pText, 10.0f, TEXTALIGN_MC);
+	Ui()->DoLabel(pRect, EditorLocalize(pText), 10.0f, TEXTALIGN_MC);
 	Checked %= 2;
 	return DoButtonLogic(pId, Checked, pRect, BUTTONFLAG_LEFT, pToolTip);
 }
@@ -111,7 +112,7 @@ int CEditor::DoButton_Ex(const void *pId, const char *pText, int Checked, const 
 	SLabelProperties Props;
 	Props.m_MaxWidth = Rect.w;
 	Props.m_EllipsisAtEnd = true;
-	Ui()->DoLabel(&Rect, pText, FontSize, Align, Props);
+	Ui()->DoLabel(&Rect, EditorLocalize(pText), FontSize, Align, Props);
 
 	return DoButtonLogic(pId, Checked, pRect, Flags, pToolTip);
 }
@@ -144,7 +145,7 @@ int CEditor::DoButton_MenuItem(const void *pId, const char *pText, int Checked, 
 	{
 		Props.SetColor(ColorRGBA(0.6f, 0.6f, 0.6f, 1.0f));
 	}
-	Ui()->DoLabel(&Rect, pText, 10.0f, TEXTALIGN_ML, Props);
+	Ui()->DoLabel(&Rect, EditorLocalize(pText), 10.0f, TEXTALIGN_ML, Props);
 
 	return DoButtonLogic(pId, Checked, pRect, Flags, pToolTip);
 }

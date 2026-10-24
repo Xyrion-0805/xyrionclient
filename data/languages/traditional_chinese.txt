@@ -907,6 +907,18 @@ Video name:
 Connect Dummy
 == 連線分身
 
+Connect Dummies
+== 連線分身
+
+Disconnect Dummies
+== 中斷全部分身連線
+
+Connecting dummies…
+== 正在連接分身…
+
+Are you sure that you want to disconnect your dummies?
+== 確定要中斷全部分身連線嗎？
+
 Client message
 == 客戶端訊息
 

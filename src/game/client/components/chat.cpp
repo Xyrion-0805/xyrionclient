@@ -2,6 +2,8 @@
 /* If you are missing that file, acquire a complete release at teeworlds.com.                */
 
 #include "chat.h"
+#include "qmclient/chat_command_hud_render.h"
+#include "qmclient/qm_chat_avatar.h"
 
 #include <base/color.h>
 #include <base/io.h>
@@ -12,6 +14,8 @@
 #include <engine/editor.h>
 #include <engine/external/regex.h>
 #include <engine/graphics.h>
+#include <engine/http.h>
+#include <engine/shared/json.h>
 #include <engine/keys.h>
 #include <engine/shared/config.h>
 #include <engine/shared/csv.h>
@@ -26,6 +30,8 @@
 #include <game/client/components/skins.h>
 #include <game/client/components/sounds.h>
 #include <game/client/components/tclient/colored_parts.h>
+#include <game/client/components/tclient/command_help.h>
+#include <game/client/components/tclient/translation_util.h>
 #include <game/client/gameclient.h>
 #include <game/localization.h>
 
@@ -48,6 +54,7 @@ void CChat::CLine::Reset(CChat &This)
 	m_Friend = false;
 	m_TimesRepeated = 0;
 	m_pManagedTeeRenderInfo = nullptr;
+	m_pExportMetadata.reset();
 	m_pTranslateResponse = nullptr;
 }
 
@@ -97,10 +104,12 @@ void CChat::RegisterCommand(const char *pName, const char *pParams, const char *
 
 	m_vServerCommands.emplace_back(pName, pParams, pHelpText);
 	m_ServerCommandsNeedSorting = true;
+	++m_ServerCommandsRevision;
 }
 
 void CChat::UnregisterCommand(const char *pName)
 {
+	++m_ServerCommandsRevision;
 	m_vServerCommands.erase(std::remove_if(m_vServerCommands.begin(), m_vServerCommands.end(), [pName](const CCommand &Command) { return str_comp(Command.m_aName, pName) == 0; }), m_vServerCommands.end());
 }
 
@@ -133,6 +142,7 @@ void CChat::OnWindowResize()
 
 void CChat::Reset()
 {
+	GameClient()->m_BcUiAnimations.OnChatReset();
 	ClearLines();
 
 	m_Show = false;
@@ -152,6 +162,9 @@ void CChat::Reset()
 	m_aCurrentInputText[0] = '\0';
 	DisableMode();
 	m_vServerCommands.clear();
+	RegisterCommand("fy", "En|Ru|Ko|Ja 内容", "将中文翻译后发送：/fy En 你要发送的文字");
+	m_CommandHud.Hide();
+	++m_ServerCommandsRevision;
 
 	for(int64_t &LastSoundPlayed : m_aLastSoundPlayed)
 		LastSoundPlayed = 0;
@@ -159,6 +172,7 @@ void CChat::Reset()
 
 void CChat::OnRelease()
 {
+	m_CommandHud.Hide();
 	m_Show = false;
 }
 
@@ -257,6 +271,15 @@ bool CChat::OnInput(const IInput::CEvent &Event)
 	if(m_Mode == MODE_NONE)
 		return false;
 
+	if(Input()->HasComposition() || GameClient()->m_Menus.IsActive() || Ui()->IsPopupOpen() || !g_Config.m_QmChatCommandCompletion)
+		m_CommandHud.Hide();
+	else
+	{
+		UpdateCommandHudCandidates();
+		if(HandleCommandHudInput(Event))
+			return true;
+	}
+
 	if(Event.m_Flags & IInput::FLAG_PRESS && Event.m_Key == KEY_ESCAPE)
 	{
 		DisableMode();
@@ -279,6 +302,8 @@ bool CChat::OnInput(const IInput::CEvent &Event)
 			; // Do nothing as bindchat was executed
 		else if(GameClient()->m_TClient.ChatDoSpecId(m_Input.GetString()))
 			; // Do nothing as specid was executed
+		else if(GameClient()->m_Translate.ChatDoTranslateCommand(m_Mode == MODE_TEAM ? 1 : 0, m_Input.GetString()))
+			; // Local /fy command, including validation failures.
 		else if(GameClient()->m_Translate.ChatDoTranslateOutgoing(m_Mode == MODE_TEAM ? 1 : 0, m_Input.GetString()))
 			; // Do nothing as outgoing translate was queued
 		else
@@ -545,17 +570,24 @@ void CChat::EnableMode(int Team)
 		m_CompletionChosen = -1;
 		m_CompletionUsed = false;
 		m_Input.Activate(EInputPriority::CHAT);
+		GameClient()->m_BcUiAnimations.OnChatEnable();
+		GameClient()->m_BcUiAnimations.SyncTypingBaseline(m_Input);
 	}
 }
 
 void CChat::DisableMode()
 {
+	m_CommandHud.Hide();
 	if(m_Mode != MODE_NONE)
 	{
 		m_Mode = MODE_NONE;
 		m_Input.Deactivate();
+		GameClient()->m_BcUiAnimations.OnChatDisable();
+		m_Input.SetHideCursor(false);
 	}
 }
+
+
 
 void CChat::OnMessage(int MsgType, void *pRawMsg)
 {
@@ -592,6 +624,7 @@ void CChat::OnMessage(int MsgType, void *pRawMsg)
 		if(!m_ServerSupportsCommandInfo)
 		{
 			m_vServerCommands.clear();
+			RegisterCommand("fy", "En|Ru|Ko|Ja 内容", "将中文翻译后发送：/fy En 你要发送的文字");
 			m_ServerSupportsCommandInfo = true;
 		}
 		RegisterCommand(pMsg->m_pName, pMsg->m_pArgsFormat, pMsg->m_pHelpText);
@@ -729,7 +762,7 @@ void CChat::AddLine(int ClientId, int Team, const char *pLine)
 
 	bool Highlighted = false;
 
-	auto &&FChatMsgCheckAndPrint = [](const CLine &Line) {
+	auto &&FChatMsgCheckAndPrint = [this](const CLine &Line) {
 		ColorRGBA ChatLogColor = ColorRGBA(1.0f, 1.0f, 1.0f, 1.0f);
 		if(Line.m_Highlighted)
 		{
@@ -761,7 +794,9 @@ void CChat::AddLine(int ClientId, int Team, const char *pLine)
 		else
 			pFrom = "chat/all";
 
-		log_info_color(color_cast<LOG_COLOR>(ChatLogColor), pFrom, "%s%s%s", Line.m_aName, Line.m_ClientId >= 0 ? ": " : "", Line.m_aText);
+		char aConsoleLine[4096];
+		str_format(aConsoleLine, sizeof(aConsoleLine), "%s%s%s", Line.m_aName, Line.m_ClientId >= 0 ? ": " : "", Line.m_aText);
+		GameClient()->m_GameConsole.PrintLineWithColorSpans(IConsole::OUTPUT_LEVEL_STANDARD, pFrom, aConsoleLine, ChatLogColor, nullptr, 0, Line.m_pExportMetadata);
 	};
 
 	// Custom color for new line
@@ -814,7 +849,7 @@ void CChat::AddLine(int ClientId, int Team, const char *pLine)
 		{
 			for(int LocalId : GameClient()->m_aLocalIds)
 			{
-				Highlighted |= LocalId >= 0 && LineShouldHighlight(pLine, GameClient()->m_aClients[LocalId].m_aName);
+				Highlighted |= LocalId >= 0 && LocalId < MAX_CLIENTS && LineShouldHighlight(pLine, GameClient()->m_aClients[LocalId].m_aName);
 			}
 		}
 	}
@@ -822,7 +857,7 @@ void CChat::AddLine(int ClientId, int Team, const char *pLine)
 	{
 		// on demo playback use local id from snap directly,
 		// since m_aLocalIds isn't valid there
-		Highlighted |= GameClient()->m_Snap.m_LocalClientId >= 0 && LineShouldHighlight(pLine, GameClient()->m_aClients[GameClient()->m_Snap.m_LocalClientId].m_aName);
+		Highlighted |= GameClient()->m_Snap.m_LocalClientId >= 0 && GameClient()->m_Snap.m_LocalClientId < MAX_CLIENTS && LineShouldHighlight(pLine, GameClient()->m_aClients[GameClient()->m_Snap.m_LocalClientId].m_aName);
 	}
 	CurrentLine.m_Highlighted = Highlighted;
 
@@ -890,6 +925,26 @@ void CChat::AddLine(int ClientId, int Team, const char *pLine)
 		}
 	}
 
+	if(ClientId >= 0 && ClientId < MAX_CLIENTS)
+	{
+		auto pMetadata = std::make_shared<QmChatExport::SMetadata>();
+		pMetadata->m_Sender = CurrentLine.m_aName;
+		pMetadata->m_Message = CurrentLine.m_aText;
+		const bool DemoPlayback = Client()->State() == IClient::STATE_DEMOPLAYBACK;
+		const int Connection = std::clamp(g_Config.m_ClDummy, 0, NUM_DUMMIES - 1);
+		pMetadata->m_Local = Team == TEAM_WHISPER_SEND ||
+			std::find(std::begin(GameClient()->m_aLocalIds), std::end(GameClient()->m_aLocalIds), ClientId) != std::end(GameClient()->m_aLocalIds) ||
+			(DemoPlayback && ClientId == GameClient()->m_Snap.m_LocalClientId);
+		const int SenderId = QmChatExport::ResolveSenderId(ClientId, Team == TEAM_WHISPER_SEND, Connection,
+			GameClient()->m_aLocalIds, std::size(GameClient()->m_aLocalIds), GameClient()->m_Snap.m_LocalClientId, DemoPlayback);
+		if(SenderId >= 0 && SenderId < MAX_CLIENTS && GameClient()->m_aClients[SenderId].m_Active)
+		{
+			pMetadata->m_pAvatar = QmChatAvatar::Capture(GameClient()->m_aClients[SenderId].m_RenderInfo, Connection);
+			if(Team == TEAM_WHISPER_SEND)
+				pMetadata->m_Sender = std::string(GameClient()->m_aClients[SenderId].m_aName) + " " + CurrentLine.m_aName;
+		}
+		CurrentLine.m_pExportMetadata = std::move(pMetadata);
+	}
 	FChatMsgCheckAndPrint(CurrentLine);
 
 	// play sound
@@ -1270,6 +1325,7 @@ void CChat::OnPrepareLines(float y)
 			}
 			Graphics()->SetColor(1, 1, 1, 1);
 			Line.m_QuadContainerIndex = Graphics()->CreateRectQuadContainer(Begin, y, FullWidth, Line.m_aYOffset[OffsetType], MessageRounding(), IGraphics::CORNER_ALL);
+			Line.m_BackgroundRect = {Begin, y, FullWidth, Line.m_aYOffset[OffsetType]};
 		}
 
 		TextRender()->SetRenderFlags(CurRenderFlags);
@@ -1311,11 +1367,14 @@ void CChat::OnRender()
 	// float y = 300.0f - 20.0f * FontSize() / 6.0f;
 
 	float ScaledFontSize = FontSize() * (8.0f / 6.0f);
+	GameClient()->m_BcUiAnimations.RefreshTypingAnimation(m_Input, m_Mode != MODE_NONE, Input()->HasComposition());
+	const float ChatOpenOffsetY = GameClient()->m_BcUiAnimations.ChatOpenOffsetY(Height, m_Mode != MODE_NONE);
+	CUIRect CommandHintAnchor{};
 	if(m_Mode != MODE_NONE)
 	{
 		// render chat input
 		CTextCursor InputCursor;
-		InputCursor.SetPosition(vec2(x, y));
+		InputCursor.SetPosition(vec2(x, y + ChatOpenOffsetY));
 		InputCursor.m_FontSize = ScaledFontSize;
 		InputCursor.m_LineWidth = Width - 190.0f;
 
@@ -1335,7 +1394,8 @@ void CChat::OnRender()
 		const CUIRect ClippingRect = {InputCursor.m_X, InputCursor.m_Y, MessageMaxWidth, 2.25f * InputCursor.m_FontSize};
 		const float XScale = Graphics()->ScreenWidth() / Width;
 		const float YScale = Graphics()->ScreenHeight() / Height;
-		Graphics()->ClipEnable((int)(ClippingRect.x * XScale), (int)(ClippingRect.y * YScale), (int)(ClippingRect.w * XScale), (int)(ClippingRect.h * YScale));
+		const CUIRect AnimatedClip = GameClient()->m_BcUiAnimations.ChatInputClipRect(ClippingRect, Width);
+		Graphics()->ClipEnable((int)(AnimatedClip.x * XScale), (int)(AnimatedClip.y * YScale), (int)(AnimatedClip.w * XScale), (int)(AnimatedClip.h * YScale));
 
 		float ScrollOffset = m_Input.GetScrollOffset();
 		float ScrollOffsetChange = m_Input.GetScrollOffsetChange();
@@ -1361,6 +1421,7 @@ void CChat::OnRender()
 		m_Input.SetScrollOffset(ScrollOffset);
 		m_Input.SetScrollOffsetChange(ScrollOffsetChange);
 
+		CommandHintAnchor = ClippingRect;
 		// Autocompletion hint
 		if(m_Input.GetString()[0] == '/' && m_Input.GetString()[1] != '\0' && !m_vServerCommands.empty())
 		{
@@ -1384,7 +1445,11 @@ void CChat::OnRender()
 #else
 	if(!g_Config.m_ClShowChat)
 #endif
+	{
+		if(CommandHintAnchor.w > 0.0f)
+			RenderCommandHud(CommandHintAnchor.x, CommandHintAnchor.y - 4.0f * CQmChatCommandHud::UI_SCALE, CommandHintAnchor.w, ScaledFontSize);
 		return;
+	}
 
 	y -= ScaledFontSize;
 
@@ -1419,6 +1484,7 @@ void CChat::OnRender()
 		if(y < HeightLimit)
 			break;
 
+		const float AnimationY = GameClient()->m_BcUiAnimations.ChatMessageYOffset(Line.m_Time, Now);
 		float Blend = Now > Line.m_Time + 14 * time_freq() && !m_PrevShowChat ? 1.0f - (Now - Line.m_Time - 14 * time_freq()) / (2.0f * time_freq()) : 1.0f;
 
 		// Draw backgrounds for messages in one batch
@@ -1427,8 +1493,14 @@ void CChat::OnRender()
 			Graphics()->TextureClear();
 			if(Line.m_QuadContainerIndex != -1)
 			{
-				Graphics()->SetColor(color_cast<ColorRGBA>(ColorHSLA(g_Config.m_ClChatBackgroundColor, true)).WithMultipliedAlpha(Blend));
-				Graphics()->RenderQuadContainerEx(Line.m_QuadContainerIndex, 0, -1, 0, ((y + RealMsgPaddingY / 2.0f) - Line.m_TextYOffset));
+				const auto Color = color_cast<ColorRGBA>(ColorHSLA(g_Config.m_ClChatBackgroundColor, true)).WithMultipliedAlpha(Blend);
+				const float Offset = (y + AnimationY + RealMsgPaddingY / 2.0f) - Line.m_TextYOffset;
+				const auto &Rect = Line.m_BackgroundRect;
+				if(!Graphics()->DrawUiGlass(Rect.x, Rect.y + Offset, Rect.w, Rect.h, Color, IGraphics::CORNER_ALL, MessageRounding()))
+				{
+					Graphics()->SetColor(Color);
+					Graphics()->RenderQuadContainerEx(Line.m_QuadContainerIndex, 0, -1, 0, Offset);
+				}
 			}
 		}
 
@@ -1447,15 +1519,18 @@ void CChat::OnRender()
 				const CAnimState *pIdleState = CAnimState::GetIdle();
 				vec2 OffsetToMid;
 				CRenderTools::GetRenderTeeOffsetToRenderedTee(pIdleState, &TeeRenderInfo, OffsetToMid);
-				vec2 TeeRenderPos(x + (RealMsgPaddingX + TeeSize) / 2.0f, y + OffsetTeeY + FullHeightMinusTee / 2.0f + OffsetToMid.y);
+				vec2 TeeRenderPos(x + (RealMsgPaddingX + TeeSize) / 2.0f, y + AnimationY + OffsetTeeY + FullHeightMinusTee / 2.0f + OffsetToMid.y);
 				RenderTools()->RenderTee(pIdleState, &TeeRenderInfo, EMOTE_NORMAL, vec2(1, 0.1f), TeeRenderPos, Blend);
 			}
 
 			const ColorRGBA TextColor = TextRender()->DefaultTextColor().WithMultipliedAlpha(Blend);
 			const ColorRGBA TextOutlineColor = TextRender()->DefaultTextOutlineColor().WithMultipliedAlpha(Blend);
-			TextRender()->RenderTextContainer(Line.m_TextContainerIndex, TextColor, TextOutlineColor, 0, (y + RealMsgPaddingY / 2.0f) - Line.m_TextYOffset);
+			TextRender()->RenderTextContainer(Line.m_TextContainerIndex, TextColor, TextOutlineColor, 0, (y + AnimationY + RealMsgPaddingY / 2.0f) - Line.m_TextYOffset);
 		}
 	}
+	// Hints are an overlay: draw after every chat message and its background.
+	if(CommandHintAnchor.w > 0.0f)
+		RenderCommandHud(CommandHintAnchor.x, CommandHintAnchor.y - 4.0f * CQmChatCommandHud::UI_SCALE, CommandHintAnchor.w, ScaledFontSize);
 }
 
 void CChat::EnsureCoherentFontSize() const
@@ -1530,4 +1605,98 @@ void CChat::SendChatQueued(const char *pLine)
 		pEntry->m_Team = m_Mode == MODE_ALL ? 0 : 1;
 		str_copy(pEntry->m_aText, pLine, Length + 1);
 	}
+}
+
+bool CChat::HandleCommandHudInput(const IInput::CEvent &Event)
+{
+	if(!m_CommandHud.MatchesSource(m_ServerCommandsRevision))
+	{
+		m_CommandHud.Hide();
+		return false;
+	}
+	if(Event.m_Flags & IInput::FLAG_PRESS)
+	{
+		if(Event.m_Key == KEY_UP || Event.m_Key == KEY_DOWN)
+			return m_CommandHud.MoveSelection(Event.m_Key == KEY_UP ? -1 : 1, m_Input.GetString(), m_Input.GetCursorOffset());
+		if(Event.m_Key == KEY_RETURN || Event.m_Key == KEY_KP_ENTER)
+		{
+			std::string Completion;
+			size_t Cursor = 0;
+			if(m_CommandHud.CompleteSelected(m_Input.GetString(), m_Input.GetCursorOffset(), Completion, Cursor))
+			{
+				ApplyCommandHudCompletion(Completion, Cursor);
+				return true;
+			}
+			return false;
+		}
+	}
+	const vec2 MousePos = GetChatMousePos();
+	if((Event.m_Flags & IInput::FLAG_PRESS) && (Event.m_Key == KEY_MOUSE_WHEEL_UP || Event.m_Key == KEY_MOUSE_WHEEL_DOWN))
+		return m_CommandHud.Scroll(MousePos.x, MousePos.y, Event.m_Key == KEY_MOUSE_WHEEL_UP ? -1 : 1, m_Input.GetString(), m_Input.GetCursorOffset());
+	if(Event.m_Key != KEY_MOUSE_1)
+		return false;
+
+	if(Event.m_Flags & IInput::FLAG_PRESS)
+	{
+		if(!m_CommandHud.Press(MousePos.x, MousePos.y, m_Input.GetString(), m_Input.GetCursorOffset()))
+			return false;
+		// 列表按下不能同时开始输入框选字或聊天记录拖选。
+		m_Input.GetMouseSelection()->m_Selecting = false;
+		return true;
+	}
+	if(Event.m_Flags & IInput::FLAG_RELEASE)
+	{
+		const bool WasPressed = m_CommandHud.IsPressed();
+		std::string Completion;
+		size_t Cursor = 0;
+		if(m_CommandHud.Release(MousePos.x, MousePos.y, m_Input.GetString(), m_Input.GetCursorOffset(), Completion, Cursor))
+			ApplyCommandHudCompletion(Completion, Cursor);
+		return WasPressed;
+	}
+	return false;
+}
+
+void CChat::ApplyCommandHudCompletion(const std::string &Completion, size_t Cursor)
+{
+	m_Input.Set(Completion.c_str());
+	m_Input.SetCursorOffset(Cursor);
+	m_Input.SelectNothing();
+	m_CompletionChosen = -1;
+	m_CompletionUsed = false;
+}
+
+vec2 CChat::GetChatMousePos() const
+{
+	const float Height = 300.0f;
+	const float Width = Height * Graphics()->ScreenAspect();
+	const vec2 WindowSize(std::max(1.0f, (float)Graphics()->WindowWidth()), std::max(1.0f, (float)Graphics()->WindowHeight()));
+	const vec2 UiMousePos = Ui()->UpdatedMousePos() * vec2(Ui()->Screen()->w, Ui()->Screen()->h) / WindowSize;
+	const vec2 UiToChatScale(Width / Ui()->Screen()->w, Height / Ui()->Screen()->h);
+	return UiMousePos * UiToChatScale;
+}
+
+void CChat::UpdateCommandHudCandidates()
+{
+	if(m_CommandHud.BeginUpdate(m_Input.GetString(), m_Input.GetCursorOffset(), g_Config.m_QmChatCommandCompletion != 0, m_ServerCommandsRevision))
+	{
+		for(const auto &Command : m_vServerCommands)
+			m_CommandHud.AddServerCommand(Command.m_aName, Command.m_aParams, Localize(Command.m_aHelpText));
+		m_CommandHud.EndUpdate();
+	}
+}
+
+void CChat::RenderCommandHud(float X, float Bottom, float Width, float FontSize)
+{
+	if(Input()->HasComposition() || GameClient()->m_Menus.IsActive() || Ui()->IsPopupOpen() || m_Mode == MODE_NONE)
+	{
+		m_CommandHud.Hide();
+		return;
+	}
+	UpdateCommandHudCandidates();
+	m_CommandHud.SetInputTransform(0.0f, 0.0f, 1.0f);
+	const CScreenRect Screen = Graphics()->GetScreen();
+	const float ScreenMargin = 4.0f;
+	Bottom = std::min(Bottom, Screen.m_BottomRight.y - ScreenMargin);
+	m_CommandHud.SetLayout(X, Bottom, Width, std::max(0.0f, Bottom - Screen.m_TopLeft.y - ScreenMargin), FontSize, Screen.m_TopLeft.x + ScreenMargin, Screen.m_BottomRight.x - ScreenMargin);
+	QmRenderChatCommandHud(m_CommandHud, Ui(), TextRender(), GetChatMousePos());
 }

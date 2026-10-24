@@ -1,4 +1,3 @@
-README.md merge=ours
-
 other/*/include/* linguist-vendored
 src/engine/external/* linguist-vendored
+docs/upstream/workflows/* linguist-vendored

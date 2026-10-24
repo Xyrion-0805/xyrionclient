@@ -609,10 +609,26 @@ void CCharacter::ResetInput()
 
 void CCharacter::PreTick()
 {
+	if(!Collision()->AxiomQuadCollisionEnabled() || m_Core.m_HookState != HOOK_GRABBED || m_Core.HookedPlayer() != -1)
+		m_AxiomHookQuad = -1;
+	else if(m_AxiomHookQuad >= 0)
+	{
+		if(!Collision()->GetAxiomHookAnchor(m_AxiomHookQuad, m_AxiomHookLocalPos, &m_Core.m_HookPos))
+		{
+			m_AxiomHookQuad = -1;
+			m_Core.m_HookState = HOOK_RETRACTED;
+			m_Core.m_HookPos = m_Core.m_Pos;
+		}
+	}
+	else
+		Collision()->FindAxiomHookAnchor(m_Core.m_HookPos, &m_AxiomHookQuad, &m_AxiomHookLocalPos);
+
 	DDRaceTick();
 
 	m_Core.m_Input = m_Input;
 	m_Core.Tick(true, !m_pGameWorld->m_WorldConfig.m_NoWeakHookAndBounce);
+	if(m_AxiomHookQuad < 0 && m_Core.m_HookState == HOOK_GRABBED && m_Core.HookedPlayer() == -1)
+		Collision()->FindAxiomHookAnchor(m_Core.m_HookPos, &m_AxiomHookQuad, &m_AxiomHookLocalPos);
 }
 
 void CCharacter::Tick()
@@ -628,6 +644,7 @@ void CCharacter::Tick()
 
 	// handle Weapons
 	HandleWeapons();
+	HandleAxiomQuads();
 
 	DDRacePostCoreTick();
 
@@ -654,6 +671,59 @@ void CCharacter::TickDeferred()
 	m_Core.Move();
 	m_Core.Quantize();
 	m_Pos = m_Core.m_Pos;
+}
+
+void CCharacter::HandleAxiomQuads()
+{
+	if(!Collision()->AxiomQuadCollisionEnabled() || !GameWorld()->m_WorldConfig.m_PredictDDRace)
+	{
+		m_LastAxiomRefillJumps = false;
+		return;
+	}
+	bool Refill = false;
+	// Native Axiom processes EVERY hit, in group/layer/quad order. Do not
+	// merge these into a single tile: an unfreeze layer can override freeze.
+	for(int Tile : Collision()->GetAxiomQuadTiles(m_Pos))
+	{
+		if(Tile == TILE_FREEZE && !m_Core.m_Super && !m_Core.m_Invincible && !m_Core.m_DeepFrozen)
+			Freeze();
+		else if(Tile == TILE_UNFREEZE && !m_Core.m_DeepFrozen)
+			Unfreeze();
+		else if(Tile == TILE_LFREEZE && !m_Core.m_Super && !m_Core.m_Invincible)
+			m_Core.m_LiveFrozen = true;
+		else if(Tile == TILE_LUNFREEZE)
+			m_Core.m_LiveFrozen = false;
+		else if(Tile == TILE_DFREEZE && !m_Core.m_Super && !m_Core.m_Invincible)
+			m_Core.m_DeepFrozen = true;
+		else if(Tile == TILE_DUNFREEZE)
+			m_Core.m_DeepFrozen = false;
+		else if(Tile == TILE_REFILL_JUMPS)
+		{
+			Refill = true;
+			if(!m_LastAxiomRefillJumps)
+				m_Core.m_JumpedTotal = m_Core.m_Jumped = 0;
+		}
+		else if(Tile == TILE_TELECHECKINEVIL && !m_Core.m_Super && !m_Core.m_Invincible)
+		{
+			for(int Checkpoint = m_TeleCheckpoint - 1; Checkpoint >= 0; --Checkpoint)
+			{
+				const auto &vOuts = Collision()->TeleCheckOuts(Checkpoint);
+				if(vOuts.empty())
+					continue;
+				m_Core.m_Pos = vOuts[GameWorld()->m_Core.RandomOr0(vOuts.size())];
+				m_Core.m_Vel = vec2(0, 0);
+				if(!g_Config.m_SvTeleportHoldHook)
+				{
+					ResetHook();
+					GameWorld()->ReleaseHooked(GetCid());
+				}
+				break;
+			}
+		}
+		// QKill and QFinish are reported by collision queries; death/finish
+		// authority stays with the server, as for ordinary DDNet tiles.
+	}
+	m_LastAxiomRefillJumps = Refill;
 }
 
 bool CCharacter::TakeDamage(vec2 Force, int Dmg, int From, int Weapon)
@@ -1072,7 +1142,10 @@ void CCharacter::HandleTiles(int Index)
 void CCharacter::HandleTuneLayer()
 {
 	int CurrentIndex = Collision()->GetMapIndex(m_Pos);
-	SetTuneZone(GameWorld()->m_WorldConfig.m_UseTuneZones ? Collision()->IsTune(CurrentIndex) : 0);
+	int Zone = GameWorld()->m_WorldConfig.m_UseTuneZones ? Collision()->IsTune(CurrentIndex) : 0;
+	if(Zone == 0 && GameWorld()->m_WorldConfig.m_UseTuneZones)
+		Zone = Collision()->GetAxiomQuadTuneZone(m_Pos);
+	SetTuneZone(Zone);
 	m_Core.m_Tuning = *GetTuning(GetOverriddenTuneZone());
 }
 
@@ -1123,6 +1196,8 @@ void CCharacter::DDRaceTick()
 			break;
 		}
 	}
+	for(int Tile : Collision()->GetAxiomQuadTiles(m_Pos))
+		m_Core.m_IsInFreeze |= Tile == TILE_FREEZE || Tile == TILE_DFREEZE || Tile == TILE_LFREEZE || Tile == TILE_DEATH;
 	if(m_Core.m_IsInFreeze && IsGrounded())
 	{
 		m_FreezeAccumulation = std::min(m_FreezeAccumulation + 1, g_Config.m_TcUnfreezeLagDelayTicks);
@@ -1408,7 +1483,13 @@ void CCharacter::ResetPrediction()
 
 void CCharacter::Read(CNetObj_Character *pChar, CNetObj_DDNetCharacter *pExtended, bool IsLocal)
 {
+	// A new authoritative hook position replaces the previous local anchor.
+	// World copies retain their anchors during deterministic tick replay.
+	m_AxiomHookQuad = -1;
 	m_Core.Read((const CNetObj_CharacterCore *)pChar);
+	Collision()->SetAxiomQuadTick(GameWorld()->GameTick(), GameWorld()->GameTickSpeed());
+	if(m_Core.m_HookState == HOOK_GRABBED && m_Core.HookedPlayer() == -1)
+		Collision()->FindAxiomHookAnchor(m_Core.m_HookPos, &m_AxiomHookQuad, &m_AxiomHookLocalPos);
 	m_IsLocal = IsLocal;
 
 	if(pExtended)

@@ -97,6 +97,18 @@ void CMenuBackground::ResetPositions()
 	m_aPositions = GenerateMenuBackgroundPositions();
 }
 
+void CMenuBackground::OnShutdown()
+{
+	m_VideoBackground.Shutdown(Graphics());
+}
+
+void CMenuBackground::OnStateChange(int NewState, int OldState)
+{
+	(void)OldState;
+	if(NewState == IClient::STATE_ONLINE || NewState == IClient::STATE_DEMOPLAYBACK)
+		m_VideoBackground.Shutdown(Graphics());
+}
+
 void CMenuBackground::LoadThemeIcon(CTheme &Theme)
 {
 	char aIconPath[IO_MAX_PATH_LENGTH];
@@ -297,6 +309,11 @@ void CMenuBackground::OnRender()
 
 bool CMenuBackground::Render()
 {
+	// Video is independent of the selected map, including the blank theme.
+	// Opening/decoding errors and unsupported builds retain the map fallback.
+	if(m_VideoBackground.Render(Graphics(), Storage(), g_Config.m_XcVideoEnabled != 0, g_Config.m_XcVideoPath, g_Config.m_XcVideoDim))
+		return true;
+
 	if(!m_Loaded)
 		return false;
 

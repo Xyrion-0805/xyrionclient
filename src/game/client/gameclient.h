@@ -4,6 +4,8 @@
 #define GAME_CLIENT_GAMECLIENT_H
 
 #include "render.h"
+#include "QmUi/QmRt.h"
+#include "qm_ime_manager.h"
 
 #include <base/color.h>
 #include <base/types.h>
@@ -67,10 +69,23 @@
 #include "components/spectator.h"
 #include "components/statboard.h"
 #include "components/tclient/bg_draw.h"
+#include "components/tclient/ai_reply.h"
+#include "components/tclient/rescue_solver.h"
+#include "components/tclient/web_browser.h"
+#include "components/bestclient/aspect_ratio.h"
+#include "components/bestclient/finish_prediction.h"
+#include "components/bestclient/inputs.h"
+#include "components/qmclient/weapon_trajectory.h"
+#include "components/bestclient/cloud_input.h"
+#include "components/bestclient/snap_tap.h"
+#include "components/bestclient/music_player.h"
+#include "components/bestclient/chat_bubbles.h"
+#include "components/bestclient/ui_animations.h"
 #include "components/tclient/bindchat.h"
 #include "components/tclient/bindwheel.h"
 #include "components/tclient/custom_communities.h"
 #include "components/tclient/mod.h"
+#include "components/tclient/modsystem/mod_manager.h"
 #include "components/tclient/moving_tiles.h"
 #include "components/tclient/mumble.h"
 #include "components/tclient/outlines.h"
@@ -204,6 +219,7 @@ public:
 	CSpectator m_Spectator;
 
 	CPlayers m_Players;
+	CQmWeaponTrajectory m_QmWeaponTrajectory;
 	CNamePlates m_NamePlates;
 	CFreezeBars m_FreezeBars;
 	CItems m_Items;
@@ -230,6 +246,20 @@ public:
 	CBindWheel m_BindWheel;
 	CBgDraw m_BgDraw;
 	CTClient m_TClient;
+	CAiReply m_AiReply;
+	CWebBrowser m_WebBrowser;
+	CRescueSolver m_RescueSolver;
+	CAspectRatio m_AspectRatio;
+	bool IsRenderingDummyMiniMap() const { return m_RenderingDummyMiniMap; }
+	void SetRenderingDummyMiniMap(bool Rendering) { m_RenderingDummyMiniMap = Rendering; }
+	CFinishPrediction m_FinishPrediction;
+	CMusicPlayer m_MusicPlayer;
+	CCloudInput m_CloudInput;
+	CSnapTap m_SnapTap;
+	bool m_ReceivedPreInput = false;
+	CChatBubbles m_ChatBubbles;
+	CBcUiAnimations m_BcUiAnimations;
+	CModSystem m_ModSystem;
 	CTrails m_Trails;
 	CTranslate m_Translate;
 	CPet m_Pet;
@@ -283,6 +313,7 @@ private:
 	int m_EditorMovementDelay = 5;
 	void UpdateEditorIngameMoved();
 
+	bool m_RenderingDummyMiniMap = false;
 	int m_PredictedTick;
 	int m_aLastNewPredictedTick[NUM_DUMMIES];
 
@@ -339,11 +370,13 @@ public:
 	class IDemoRecorder *DemoRecorder(int Recorder) const { return Client()->DemoRecorder(Recorder); }
 	class IFavorites *Favorites() const { return m_pFavorites; }
 	class IServerBrowser *ServerBrowser() const { return m_pServerBrowser; }
+	CUiRuntimeV2 *UiRuntimeV2() { return &m_UiRuntimeV2; }
 	class CRenderTools *RenderTools() { return &m_RenderTools; }
 	class CRenderMap *RenderMap() { return &m_RenderMap; }
 	class CLayers *Layers() { return &m_Layers; }
 	CCollision *Collision() { return &m_Collision; }
 	const CCollision *Collision() const { return &m_Collision; }
+	void UpdateAxiomQuadCollision();
 	const CRaceHelper *RaceHelper() const { return &m_RaceHelper; }
 	class IEditor *Editor() { return m_pEditor; }
 	class IFriends *Friends() { return m_pFriends; }
@@ -658,9 +691,12 @@ public:
 	CClientStats m_aStats[MAX_CLIENTS];
 
 	CRenderTools m_RenderTools;
+	CUiRuntimeV2 m_UiRuntimeV2;
+	CQmImeManager m_QmImeManager;
 	CRenderMap m_RenderMap;
 
 	bool m_BackButtonHandledKeyBind = false;
+	int m_LastAutoLockTeam = 0;
 
 	void OnReset();
 
@@ -671,6 +707,7 @@ public:
 	void OnRender() override;
 	void OnUpdate() override;
 	void OnDummyDisconnect() override;
+	void OnDummyChange(const int *pInput) override;
 	virtual void OnRelease();
 	void OnInit() override;
 	void OnConsoleInit() override;
@@ -808,6 +845,9 @@ public:
 	void LoadParticlesSkin(const char *pPath, bool AsDir = false);
 	void LoadHudSkin(const char *pPath, bool AsDir = false);
 	void LoadExtrasSkin(const char *pPath, bool AsDir = false);
+	void LoadCursorAsset(const char *pPath);
+	void LoadArrowAsset(const char *pPath);
+	void LoadUiAsset(const char *pPath, int ImageId, const char *pDirectory);
 
 	struct SClientGameSkin
 	{
@@ -978,6 +1018,8 @@ public:
 	vec2 GetSmoothPos(int ClientId);
 	vec2 GetFreezePos(int ClientId);
 	vec2 GetFastInputPos(int ClientId);
+	bool IsCloudInputMode() const;
+	bool IsFastInputLocalClient(int ClientId) const;
 
 	int m_MultiViewTeam;
 	float m_MultiViewPersonalZoom;

@@ -62,6 +62,8 @@ enum class EFontPreset
 {
 	DEFAULT_FONT,
 	ICON_FONT,
+	QM_ICON_FONT,
+	QM_ICON_FONT_FILL,
 };
 
 enum ETextCursorSelectionMode
@@ -90,6 +92,8 @@ struct STextBoundingBox
 	float m_Y;
 	float m_W;
 	float m_H;
+	float m_MaxCharacterHeight = 0.0f;
+	int m_LineCount = 1;
 
 	float Right() const { return m_X + m_W; }
 	float Bottom() const { return m_Y + m_H; }
@@ -108,9 +112,36 @@ struct STextColorSplit
 	int m_CharIndex; // Which index within the text should the split occur
 	int m_Length; // How long is the split
 	ColorRGBA m_Color; // The color the text should be starting from m_CharIndex
+	// QmClient：字符内横向渐变的右边缘色。默认等于 m_Color，此时顶点色与旧行为逐字节一致。
+	ColorRGBA m_ColorEnd;
 
 	STextColorSplit(int CharIndex, int Length, const ColorRGBA &Color) :
-		m_CharIndex(CharIndex), m_Length(Length), m_Color(Color) {}
+		m_CharIndex(CharIndex), m_Length(Length), m_Color(Color), m_ColorEnd(Color) {}
+
+	// QmClient：显式指定左右边缘色，使单个字符内部产生横向渐变。
+	STextColorSplit(int CharIndex, int Length, const ColorRGBA &Color, const ColorRGBA &ColorEnd) :
+		m_CharIndex(CharIndex), m_Length(Length), m_Color(Color), m_ColorEnd(ColorEnd) {}
+};
+
+// QmClient：逐字符顶点变换，用于浮动和缩放回弹。
+// 变换只作用于渲染顶点，不参与布局、断行、选区与光标计算，因此文字宽度和对齐保持稳定。
+struct STextCharOffset
+{
+	int m_CharIndex; // 文本中的字符序号，与 STextColorSplit 使用同一套序号
+	float m_XOffset;
+	float m_YOffset;
+	float m_Scale;
+
+	STextCharOffset(int CharIndex, float XOffset, float YOffset, float Scale = 1.0f) :
+		m_CharIndex(CharIndex), m_XOffset(XOffset), m_YOffset(YOffset), m_Scale(Scale) {}
+
+	vec2 TransformVertex(vec2 Position, vec2 Center) const
+	{
+		// 默认比例沿用原顶点坐标，避免影响既有浮动效果的像素对齐。
+		if(m_Scale != 1.0f)
+			Position = Center + (Position - Center) * m_Scale;
+		return Position + vec2(m_XOffset, m_YOffset);
+	}
 };
 
 class CTextCursor
@@ -128,6 +159,14 @@ public:
 	float m_X = 0.0f;
 	float m_Y = 0.0f;
 	float m_MaxCharacterHeight = 0.0f;
+	bool m_CalculateVisualBoundingBox = false;
+	// 按需缓存实际绘制的行范围，用于逐行扫光。
+	bool m_TrackLineRanges = false;
+	bool m_HasVisualBoundingBox = false;
+	float m_VisualLeft = 0.0f;
+	float m_VisualRight = 0.0f;
+	float m_VisualTop = 0.0f;
+	float m_VisualBottom = 0.0f;
 	float m_LongestLineWidth = 0.0f;
 
 	float m_FontSize = 0.0f;
@@ -150,9 +189,13 @@ public:
 
 	ETextCursorCursorMode m_CursorMode = TEXT_CURSOR_CURSOR_MODE_NONE;
 	bool m_ForceCursorRendering = false;
+	bool m_RenderCursor = true;
+	bool m_RenderSelection = true;
+	std::vector<IGraphics::CQuadItem> m_vSelectionQuads;
 	// note this is the decoded character offset
 	int m_CursorCharacter = -1;
 	vec2 m_CursorRenderedPosition = vec2(-1.0f, -1.0f);
+	bool m_HasCursorRenderedPosition = false;
 
 	/**
 	 * Whether the text was truncated with @link TEXTFLAG_STOP_AT_END @endlink or @link TEXTFLAG_ELLIPSIS_AT_END @endlink being set.
@@ -161,10 +204,27 @@ public:
 
 	// Color splits of the cursor to allow multicolored text
 	std::vector<STextColorSplit> m_vColorSplits;
+	// 渐变取色仅在同步创建字形顶点时调用；上下文须存活到 TextEx/CreateTextContainer 返回。
+	using FColorSampler = ColorRGBA (*)(vec2 Position, const void *pContext);
+	FColorSampler m_pfnColorSampler = nullptr;
+	const void *m_pColorSamplerContext = nullptr;
+	int m_ColorSamplerColumns = 8;
+	int m_ColorSamplerRows = 8;
+
+	// QmClient：逐字符顶点偏移。按字符序号升序排列且覆盖每个字符，未偏移的字符填 0，
+	// 否则游标推进方式（顺序消费）会与字符错位。
+	std::vector<STextCharOffset> m_vCharOffsets;
+
 
 	float Height() const;
 	STextBoundingBox BoundingBox() const;
-	void SetPosition(vec2 Position);
+	void SetPosition(vec2 Position)
+	{
+		m_StartX = Position.x;
+		m_StartY = Position.y;
+		m_X = Position.x;
+		m_Y = Position.y;
+	}
 };
 
 struct STextContainerUsages
@@ -188,6 +248,8 @@ struct STextSizeProperties
 	float *m_pHeight = nullptr;
 	float *m_pAlignedFontSize = nullptr;
 	float *m_pMaxCharacterHeightInLine = nullptr;
+	float *m_pVisualTop = nullptr;
+	float *m_pVisualBottom = nullptr;
 	int *m_pLineCount = nullptr;
 };
 
@@ -200,6 +262,11 @@ public:
 
 	virtual bool LoadFonts() = 0;
 	virtual void SetFontPreset(EFontPreset FontPreset) = 0;
+	virtual EFontPreset GetFontPreset() const = 0;
+	virtual uint64_t GlyphAtlasRevision() const = 0;
+	virtual void SetFontPreviewFace(const char *pFace) = 0;
+	virtual bool QmHasCustomFace(const char *pFace) = 0;
+	virtual bool QmFontFamilyDefaultConfig(const char *pFamily, std::string &Config) = 0;
 	virtual void SetFontLanguageVariant(const char *pLanguageFile) = 0;
 
 	virtual void SetRenderFlags(unsigned Flags) = 0;

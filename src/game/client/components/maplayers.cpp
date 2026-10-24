@@ -50,13 +50,18 @@ void CMapLayers::OnMapLoad()
 
 void CMapLayers::OnRender()
 {
+	RenderCustom(GetCurCamera()->m_Center, GetCurCamera()->m_Zoom);
+}
+
+void CMapLayers::RenderCustom(vec2 Center, float Zoom)
+{
 	if(m_OnlineOnly && Client()->State() != IClient::STATE_ONLINE && Client()->State() != IClient::STATE_DEMOPLAYBACK)
 		return;
 
 	// dynamic parameters for ingame rendering
 	m_Params.m_EntityOverlayVal = m_Type == RENDERTYPE_FULL_DESIGN ? 0 : g_Config.m_ClOverlayEntities;
-	m_Params.m_Center = GetCurCamera()->m_Center;
-	m_Params.m_Zoom = GetCurCamera()->m_Zoom;
+	m_Params.m_Center = Center;
+	m_Params.m_Zoom = Zoom;
 	m_Params.m_RenderText = g_Config.m_ClTextEntities;
 	m_Params.m_DebugRenderGroupClips = g_Config.m_DbgRenderGroupClips;
 	m_Params.m_DebugRenderQuadClips = g_Config.m_DbgRenderQuadClips;

@@ -34,7 +34,9 @@ enum
 	ASSETS_TAB_PARTICLES = 3,
 	ASSETS_TAB_HUD = 4,
 	ASSETS_TAB_EXTRAS = 5,
-	NUMBER_OF_ASSETS_TABS = 6,
+	ASSETS_TAB_CURSOR = 6,
+	ASSETS_TAB_ARROW = 7,
+	NUMBER_OF_ASSETS_TABS = 8,
 };
 
 void CMenus::LoadEntities(SCustomEntities *pEntitiesItem, void *pUser)
@@ -116,7 +118,7 @@ static void LoadAsset(TName *pAssetItem, const char *pAssetName, IGraphics *pGra
 	char aPath[IO_MAX_PATH_LENGTH];
 	if(str_comp(pAssetItem->m_aName, "default") == 0)
 	{
-		str_format(aPath, sizeof(aPath), "%s.png", pAssetName);
+		str_format(aPath, sizeof(aPath), "%s.png", str_comp(pAssetName, "cursor") == 0 ? "gui_cursor" : pAssetName);
 		pAssetItem->m_RenderTexture = pGraphics->LoadTexture(aPath, IStorage::TYPE_ALL);
 	}
 	else
@@ -125,7 +127,12 @@ static void LoadAsset(TName *pAssetItem, const char *pAssetName, IGraphics *pGra
 		pAssetItem->m_RenderTexture = pGraphics->LoadTexture(aPath, IStorage::TYPE_ALL);
 		if(pAssetItem->m_RenderTexture.IsNullTexture())
 		{
-			str_format(aPath, sizeof(aPath), "assets/%s/%s/%s.png", pAssetName, pAssetItem->m_aName, pAssetName);
+			str_format(aPath, sizeof(aPath), "assets/%s/%s/%s.png", pAssetName, pAssetItem->m_aName, str_comp(pAssetName, "cursor") == 0 ? "gui_cursor" : pAssetName);
+			pAssetItem->m_RenderTexture = pGraphics->LoadTexture(aPath, IStorage::TYPE_ALL);
+		}
+		if(pAssetItem->m_RenderTexture.IsNullTexture() && str_comp(pAssetName, "cursor") == 0)
+		{
+			str_format(aPath, sizeof(aPath), "assets/cursor/%s/cursor.png", pAssetItem->m_aName);
 			pAssetItem->m_RenderTexture = pGraphics->LoadTexture(aPath, IStorage::TYPE_ALL);
 		}
 	}
@@ -211,6 +218,19 @@ int CMenus::ExtrasScan(const char *pName, int IsDir, int DirType, void *pUser)
 	return AssetScan(pName, IsDir, DirType, pThis->m_vExtrasList, "extras", pGraphics, pUser);
 }
 
+int CMenus::CursorScan(const char *pName, int IsDir, int DirType, void *pUser)
+{
+	auto *pUserData = static_cast<SMenuAssetScanUser *>(pUser);
+	auto *pThis = static_cast<CMenus *>(pUserData->m_pUser);
+	return AssetScan(pName, IsDir, DirType, pThis->m_vCursorList, "cursor", pThis->Graphics(), pUser);
+}
+int CMenus::ArrowScan(const char *pName, int IsDir, int DirType, void *pUser)
+{
+	auto *pUserData = static_cast<SMenuAssetScanUser *>(pUser);
+	auto *pThis = static_cast<CMenus *>(pUserData->m_pUser);
+	return AssetScan(pName, IsDir, DirType, pThis->m_vArrowList, "arrow", pThis->Graphics(), pUser);
+}
+static std::vector<const CMenus::SCustomItem *> gs_vpSearchCursorList, gs_vpSearchArrowList;
 static std::vector<const CMenus::SCustomEntities *> gs_vpSearchEntitiesList;
 static std::vector<const CMenus::SCustomGame *> gs_vpSearchGamesList;
 static std::vector<const CMenus::SCustomEmoticon *> gs_vpSearchEmoticonsList;
@@ -229,6 +249,7 @@ static size_t gs_aCustomListSize[NUMBER_OF_ASSETS_TABS] = {
 static CLineInputBuffered<64> s_aFilterInputs[NUMBER_OF_ASSETS_TABS];
 
 static int s_CurCustomTab = ASSETS_TAB_ENTITIES;
+static std::string s_aEditorSelections[NUMBER_OF_ASSETS_TABS];
 
 static const CMenus::SCustomItem *GetCustomItem(int CurTab, size_t Index)
 {
@@ -244,6 +265,8 @@ static const CMenus::SCustomItem *GetCustomItem(int CurTab, size_t Index)
 		return gs_vpSearchHudList[Index];
 	else if(CurTab == ASSETS_TAB_EXTRAS)
 		return gs_vpSearchExtrasList[Index];
+	if(CurTab == ASSETS_TAB_CURSOR) return gs_vpSearchCursorList[Index];
+	if(CurTab == ASSETS_TAB_ARROW) return gs_vpSearchArrowList[Index];
 	dbg_assert_failed("Invalid CurTab: %d", CurTab);
 }
 
@@ -308,6 +331,8 @@ void CMenus::ClearCustomItems(int CurTab)
 		// reload current DDNet particles skin
 		GameClient()->LoadExtrasSkin(g_Config.m_ClAssetExtras);
 	}
+	else if(CurTab == ASSETS_TAB_CURSOR) { ClearAssetList(m_vCursorList, Graphics()); GameClient()->LoadCursorAsset(g_Config.m_ClAssetCursor); }
+	else if(CurTab == ASSETS_TAB_ARROW) { ClearAssetList(m_vArrowList, Graphics()); GameClient()->LoadArrowAsset(g_Config.m_ClAssetArrow); }
 	else
 	{
 		dbg_assert_failed("Invalid CurTab: %d", CurTab);
@@ -353,6 +378,27 @@ static int InitSearchList(std::vector<const TName *> &vpSearchList, std::vector<
 
 void CMenus::RenderSettingsAssets(CUIRect MainView)
 {
+	if(m_AssetsEditorState.m_Open && m_AssetsEditorState.m_ExploreSide >= 0 && Ui()->ConsumeHotkey(CUi::HOTKEY_ESCAPE))
+	{
+		m_AssetsEditorState.m_ExploreSide = -1;
+		return;
+	}
+	if(m_AssetsEditorState.m_Open && m_AssetsEditorState.m_ExploreSide < 0)
+	{
+		RenderAssetsEditorScreen(MainView);
+		return;
+	}
+	CUIRect EditorBar, EditorButton;
+	MainView.HSplitTop(24.0f, &EditorBar, &MainView);
+	EditorBar.VSplitRight(160.0f, nullptr, &EditorButton);
+	static CButtonContainer s_EditorButton;
+	if(m_AssetsEditorState.m_Open) Ui()->DoLabel(&EditorBar, "双击资源或按 Enter 选择", 12.0f, TEXTALIGN_ML);
+	if(DoButton_Menu(&s_EditorButton, m_AssetsEditorState.m_Open ? "返回资源编辑器" : "资源裁切编辑器", 0, &EditorButton))
+	{
+		m_AssetsEditorState.m_Open = true;
+		m_AssetsEditorState.m_ExploreSide = -1;
+		return;
+	}
 	CUIRect TabBar, CustomList, QuickSearch, DirectoryButton, ReloadButton;
 
 	MainView.HSplitTop(20.0f, &TabBar, &MainView);
@@ -364,7 +410,7 @@ void CMenus::RenderSettingsAssets(CUIRect MainView)
 		Localize("Emoticons"),
 		Localize("Particles"),
 		Localize("HUD"),
-		Localize("Extras")};
+		Localize("Extras"), "光标", "箭头"};
 
 	for(int Tab = ASSETS_TAB_ENTITIES; Tab < NUMBER_OF_ASSETS_TABS; ++Tab)
 	{
@@ -420,6 +466,8 @@ void CMenus::RenderSettingsAssets(CUIRect MainView)
 	{
 		InitAssetList(m_vExtrasList, "assets/extras", "extras", ExtrasScan, Graphics(), Storage(), &User);
 	}
+	else if(s_CurCustomTab == ASSETS_TAB_CURSOR) InitAssetList(m_vCursorList, "assets/cursor", "cursor", CursorScan, Graphics(), Storage(), &User);
+	else if(s_CurCustomTab == ASSETS_TAB_ARROW) InitAssetList(m_vArrowList, "assets/arrow", "arrow", ArrowScan, Graphics(), Storage(), &User);
 	else
 	{
 		dbg_assert_failed("Invalid s_CurCustomTab: %d", s_CurCustomTab);
@@ -467,6 +515,8 @@ void CMenus::RenderSettingsAssets(CUIRect MainView)
 		{
 			ListSize = InitSearchList(gs_vpSearchExtrasList, m_vExtrasList);
 		}
+		else if(s_CurCustomTab == ASSETS_TAB_CURSOR) ListSize = InitSearchList(gs_vpSearchCursorList, m_vCursorList);
+		else if(s_CurCustomTab == ASSETS_TAB_ARROW) ListSize = InitSearchList(gs_vpSearchArrowList, m_vArrowList);
 		gs_aInitCustomList[s_CurCustomTab] = false;
 		gs_aCustomListSize[s_CurCustomTab] = ListSize;
 	}
@@ -504,44 +554,23 @@ void CMenus::RenderSettingsAssets(CUIRect MainView)
 		SearchListSize = gs_vpSearchExtrasList.size();
 	}
 
+	if(s_CurCustomTab == ASSETS_TAB_CURSOR) SearchListSize = gs_vpSearchCursorList.size();
+	if(s_CurCustomTab == ASSETS_TAB_ARROW) SearchListSize = gs_vpSearchArrowList.size();
+	const bool EditorPick = m_AssetsEditorState.m_Open && m_AssetsEditorState.m_ExploreSide >= 0;
+	const char *apCurrentNames[NUMBER_OF_ASSETS_TABS] = {
+		g_Config.m_ClAssetsEntities, g_Config.m_ClAssetGame, g_Config.m_ClAssetEmoticons,
+		g_Config.m_ClAssetParticles, g_Config.m_ClAssetHud, g_Config.m_ClAssetExtras,
+		g_Config.m_ClAssetCursor, g_Config.m_ClAssetArrow};
+	const char *pSelectedName = EditorPick ? s_aEditorSelections[s_CurCustomTab].c_str() : apCurrentNames[s_CurCustomTab];
+	for(size_t i = 0; i < SearchListSize; ++i)
+		if(str_comp(GetCustomItem(s_CurCustomTab, i)->m_aName, pSelectedName) == 0) { OldSelected = (int)i; break; }
 	static CListBox s_ListBox;
-	s_ListBox.DoStart(TextureHeight + 15.0f + 10.0f + Margin, SearchListSize, CustomList.w / (Margin + TextureWidth), 1, OldSelected, &CustomList, false);
+	s_ListBox.DoStart(TextureHeight + 15.0f + 10.0f + Margin, SearchListSize, std::max(1, (int)(CustomList.w / (Margin + TextureWidth))), 1, OldSelected, &CustomList, false);
 	for(size_t i = 0; i < SearchListSize; ++i)
 	{
 		const SCustomItem *pItem = GetCustomItem(s_CurCustomTab, i);
 		if(pItem == nullptr)
 			continue;
-
-		if(s_CurCustomTab == ASSETS_TAB_ENTITIES)
-		{
-			if(str_comp(pItem->m_aName, g_Config.m_ClAssetsEntities) == 0)
-				OldSelected = i;
-		}
-		else if(s_CurCustomTab == ASSETS_TAB_GAME)
-		{
-			if(str_comp(pItem->m_aName, g_Config.m_ClAssetGame) == 0)
-				OldSelected = i;
-		}
-		else if(s_CurCustomTab == ASSETS_TAB_EMOTICONS)
-		{
-			if(str_comp(pItem->m_aName, g_Config.m_ClAssetEmoticons) == 0)
-				OldSelected = i;
-		}
-		else if(s_CurCustomTab == ASSETS_TAB_PARTICLES)
-		{
-			if(str_comp(pItem->m_aName, g_Config.m_ClAssetParticles) == 0)
-				OldSelected = i;
-		}
-		else if(s_CurCustomTab == ASSETS_TAB_HUD)
-		{
-			if(str_comp(pItem->m_aName, g_Config.m_ClAssetHud) == 0)
-				OldSelected = i;
-		}
-		else if(s_CurCustomTab == ASSETS_TAB_EXTRAS)
-		{
-			if(str_comp(pItem->m_aName, g_Config.m_ClAssetExtras) == 0)
-				OldSelected = i;
-		}
 
 		const CListboxItem Item = s_ListBox.DoNextItem(pItem, OldSelected >= 0 && (size_t)OldSelected == i);
 		CUIRect ItemRect = Item.m_Rect;
@@ -567,9 +596,15 @@ void CMenus::RenderSettingsAssets(CUIRect MainView)
 	}
 
 	const int NewSelected = s_ListBox.DoEnd();
-	if(OldSelected != NewSelected)
+	if(NewSelected >= 0 && (size_t)NewSelected < SearchListSize && (OldSelected != NewSelected || m_AssetsEditorState.m_Open))
 	{
-		if(GetCustomItem(s_CurCustomTab, NewSelected)->m_aName[0] != '\0')
+		if(EditorPick)
+		{
+			s_aEditorSelections[s_CurCustomTab] = GetCustomItem(s_CurCustomTab, NewSelected)->m_aName;
+			if(s_ListBox.WasItemActivated() || (s_ListBox.Active() && Ui()->ConsumeHotkey(CUi::HOTKEY_ENTER)))
+				AssetsEditorAssignPickedAsset(m_AssetsEditorState.m_ExploreSide, s_CurCustomTab, GetCustomItem(s_CurCustomTab, NewSelected)->m_aName);
+		}
+		else if(GetCustomItem(s_CurCustomTab, NewSelected)->m_aName[0] != '\0')
 		{
 			if(s_CurCustomTab == ASSETS_TAB_ENTITIES)
 			{
@@ -601,6 +636,8 @@ void CMenus::RenderSettingsAssets(CUIRect MainView)
 				str_copy(g_Config.m_ClAssetExtras, GetCustomItem(s_CurCustomTab, NewSelected)->m_aName);
 				GameClient()->LoadExtrasSkin(g_Config.m_ClAssetExtras);
 			}
+			else if(s_CurCustomTab == ASSETS_TAB_CURSOR) { str_copy(g_Config.m_ClAssetCursor, GetCustomItem(s_CurCustomTab, NewSelected)->m_aName); GameClient()->LoadCursorAsset(g_Config.m_ClAssetCursor); }
+			else if(s_CurCustomTab == ASSETS_TAB_ARROW) { str_copy(g_Config.m_ClAssetArrow, GetCustomItem(s_CurCustomTab, NewSelected)->m_aName); GameClient()->LoadArrowAsset(g_Config.m_ClAssetArrow); }
 		}
 	}
 
@@ -634,6 +671,8 @@ void CMenus::RenderSettingsAssets(CUIRect MainView)
 			str_copy(aBufFull, "assets/hud");
 		else if(s_CurCustomTab == ASSETS_TAB_EXTRAS)
 			str_copy(aBufFull, "assets/extras");
+		else if(s_CurCustomTab == ASSETS_TAB_CURSOR) str_copy(aBufFull, "assets/cursor");
+		else if(s_CurCustomTab == ASSETS_TAB_ARROW) str_copy(aBufFull, "assets/arrow");
 		Storage()->GetCompletePath(IStorage::TYPE_SAVE, aBufFull, aBuf, sizeof(aBuf));
 		Storage()->CreateFolder("assets", IStorage::TYPE_SAVE);
 		Storage()->CreateFolder(aBufFull, IStorage::TYPE_SAVE);

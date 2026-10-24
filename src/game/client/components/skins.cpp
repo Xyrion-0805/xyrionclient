@@ -2,6 +2,7 @@
 /* If you are missing that file, acquire a complete release at teeworlds.com.                */
 
 #include "skins.h"
+#include "qmclient/qm_chat_avatar.h"
 
 #include <base/dbg.h>
 #include <base/log.h>
@@ -412,6 +413,15 @@ bool CSkins::LoadSkinData(const char *pName, CSkinLoadData &Data) const
 	return true;
 }
 
+inline std::shared_ptr<const QmChatAvatar::SSource> QmPrepareSkinChatAvatar(const CImageInfo &Image, const CDataSprite *pSprites)
+{
+	auto pSource = std::make_shared<QmChatAvatar::SSource>();
+	constexpr int aSprites[] = {SPRITE_TEE_BODY, SPRITE_TEE_BODY_OUTLINE, SPRITE_TEE_FOOT, SPRITE_TEE_FOOT_OUTLINE, SPRITE_TEE_EYE_NORMAL};
+	for(size_t Index = 0; Index < std::size(aSprites); ++Index)
+		pSource->m_aSprites[Index] = QmChatAvatar::CopySprite(Image, pSprites[aSprites[Index]]);
+	return pSource;
+}
+
 void CSkins::LoadSkinFinish(CSkinContainer *pSkinContainer, const CSkinLoadData &Data)
 {
 	CSkin Skin{pSkinContainer->Name()};
@@ -439,6 +449,8 @@ void CSkins::LoadSkinFinish(CSkinContainer *pSkinContainer, const CSkinLoadData 
 		Skin.m_ColorableSkin.m_aEyes[i] = Graphics()->LoadSpriteTexture(Data.m_InfoGrayscale, std::nullopt, &g_pData->m_aSprites[SPRITE_TEE_EYE_NORMAL + i]);
 	}
 
+	Skin.m_OriginalSkin.m_QmChatAvatar = QmPrepareSkinChatAvatar(Data.m_Info, g_pData->m_aSprites);
+	Skin.m_ColorableSkin.m_QmChatAvatar = QmPrepareSkinChatAvatar(Data.m_InfoGrayscale, g_pData->m_aSprites);
 	Skin.m_Metrics = Data.m_Metrics;
 	Skin.m_BloodColor = Data.m_BloodColor;
 

@@ -1,8 +1,14 @@
 #include "tooltips.h"
 
-#include <base/time.h>
+#include <engine/shared/config.h>
 
+#include <game/client/QmUi/SettingsPageLayout.h>
+#include <game/client/QmUi/UiConfigHint.h>
+#include <game/client/gameclient.h>
 #include <game/client/ui.h>
+#include <game/localization.h>
+
+#include <algorithm>
 
 CTooltips::CTooltips()
 {
@@ -11,154 +17,335 @@ CTooltips::CTooltips()
 
 void CTooltips::OnReset()
 {
-	m_HoverTime = -1;
+	m_Frame = 1;
+	m_ConfigHelpInitialized = false;
+	m_ConfigHelp.clear();
 	m_Tooltips.clear();
+	m_ConfigHints.clear();
+	m_CardLabelTexts.Clear();
+	m_CardLabelHint = {};
+	m_Context.reset();
 	ClearActiveTooltip();
 }
 
 void CTooltips::SetActiveTooltip(CTooltip &Tooltip)
 {
-	m_ActiveTooltip.emplace(Tooltip);
+	if(!m_ActiveTooltip || QmTooltipMayReplace(Tooltip, m_ActiveTooltip->get(), m_Frame, m_ActiveTooltip->get().m_OnScreen && QmTooltipHovered(m_ActiveTooltip->get(), *Ui())))
+		m_ActiveTooltip.emplace(Tooltip);
 }
 
-inline void CTooltips::ClearActiveTooltip()
+void CTooltips::RecordSource(const void *pId, const CUIRect &Rect)
+{
+	// 配置入口即使不悬浮也能提供几何证据；只更新已有来源，不为未显示控件分配缓存。
+	const auto Source = m_Tooltips.find(reinterpret_cast<uintptr_t>(pId));
+	if(Source != m_Tooltips.end() && !QmTooltipSourceInvalidated(Source->second, m_Frame))
+		QmTooltipRecordSource(Source->second, m_Frame, Rect, Ui()->IsClipped() ? Ui()->ClipArea() : nullptr, Ui()->MousePos());
+}
+
+void CTooltips::ResetPresentation()
+{
+	m_HoverState.Clear();
+	m_MotionState.Clear();
+	m_DisplayTooltip = {};
+	if(m_TextCache.Index().m_Index >= 0)
+		m_TextCache.Clear(*TextRender());
+}
+
+void CTooltips::ClearActiveTooltip()
 {
 	m_ActiveTooltip.reset();
-	m_PreviousTooltip.reset();
+	m_CardLabelHint.m_OnScreen = false;
+	ResetPresentation();
+}
+
+const char *CTooltips::PrepareCardLabel(const CUIRect *pRect, const char *pText, bool Render)
+{
+	if(pText == nullptr || (str_find(pText, "(") == nullptr && str_find(pText, "（") == nullptr))
+		return pText;
+	const SQmCardLabelText &Text = m_CardLabelTexts.Get(pText);
+	// 只刷新已显示的同一标签；本帧已悬浮登记的目标不被后续未悬浮绘制覆盖。
+	if(Render && pRect != nullptr && !Text.m_Hint.empty() && m_CardLabelHint.m_pId == &Text && !QmTooltipRegistered(m_CardLabelHint, m_Frame))
+		QmTooltipRecordSource(m_CardLabelHint, m_Frame, *pRect, Ui()->IsClipped() ? Ui()->ClipArea() : nullptr, Ui()->MousePos());
+	if(Render && pRect != nullptr && Ui()->MouseHovered(pRect) && !Text.m_Hint.empty())
+	{
+		m_CardLabelHint.m_pId = &Text;
+		m_CardLabelHint.m_Rect = m_CardLabelHint.m_Anchor = *pRect;
+		m_CardLabelHint.m_Text = Text.m_Hint;
+		m_CardLabelHint.m_SmallInstant = true;
+		m_CardLabelHint.m_HoverByRect = true;
+		m_CardLabelHint.m_Immediate = true;
+		m_CardLabelHint.m_OnScreen = true;
+		m_CardLabelHint.m_FontSize = ResolveSettingsSmallFontSize(g_Config.m_QmUiScale / 100.0f);
+		m_CardLabelHint.m_RegisteredFrame = m_Frame;
+		m_CardLabelHint.m_RegisteredContext = GameClient()->m_Menus.TooltipContext();
+		QmTooltipRecordSource(m_CardLabelHint, m_Frame, *pRect, Ui()->IsClipped() ? Ui()->ClipArea() : nullptr, Ui()->MousePos());
+	}
+	return Text.m_Label.c_str();
 }
 
 // TClient
 void CTooltips::SetFadeTime(const void *pId, float Time)
 {
 	uintptr_t Id = reinterpret_cast<uintptr_t>(pId);
-	const auto It = m_Tooltips.find(Id);
-	if(It != m_Tooltips.end())
+	const auto Iter = m_Tooltips.find(Id);
+	if(Iter != m_Tooltips.end())
 	{
-		It->second.m_FadeTime = Time;
+		Iter->second.m_FadeTime = Time;
 	}
 }
 
 void CTooltips::DoToolTip(const void *pId, const CUIRect *pNearRect, const char *pText, float WidthHint)
 {
-	uintptr_t Id = reinterpret_cast<uintptr_t>(pId);
-	const auto &[Entry, WasInserted] = m_Tooltips.emplace(Id, CTooltip{
-									  pId,
-									  *pNearRect,
-									  pText,
-									  WidthHint,
-									  false});
+	const bool Small = GameClient()->m_Menus.IsSettingsPageActive();
+	DoToolTip(pId, pNearRect, pText, WidthHint, Small ? ResolveSettingsSmallFontSize(g_Config.m_QmUiScale / 100.0f) : 14.0f, Small, Small);
+}
+
+void CTooltips::DoToolTipForRect(const void *pId, const CUIRect *pNearRect, const char *pText, float WidthHint)
+{
+	const bool Small = GameClient()->m_Menus.IsSettingsPageActive();
+	DoToolTip(pId, pNearRect, pText, WidthHint, Small ? ResolveSettingsSmallFontSize(g_Config.m_QmUiScale / 100.0f) : 14.0f, Small, true);
+}
+
+void CTooltips::DoInfoToolTipForRect(const void *pId, const CUIRect *pNearRect, const char *pText, float WidthHint, float FontSize)
+{
+	const bool Small = GameClient()->m_Menus.IsSettingsPageActive();
+	DoToolTip(pId, pNearRect, pText, WidthHint, Small ? ResolveSettingsSmallFontSize(g_Config.m_QmUiScale / 100.0f) : FontSize, Small, true, true);
+}
+
+void CTooltips::DoSmallToolTip(const void *pId, const CUIRect *pNearRect, const char *pText, float FontSize, float WidthHint)
+{
+	const bool Small = GameClient()->m_Menus.IsSettingsPageActive();
+	DoToolTip(pId, pNearRect, pText, WidthHint, Small ? FontSize : 14.0f, Small, true, true);
+}
+
+void CTooltips::DoConfigToolTip(const void *pId, const CUIRect *pNearRect, const void *pValue, const void *pSecondValue)
+{
+	if(Ui()->RenderOnly() || pId == nullptr)
+		return;
+	const bool Small = GameClient()->m_Menus.IsSettingsPageActive();
+	if(Small)
+	{
+		DoSettingsToolTipForConfig(pId, pNearRect, pValue, nullptr, pSecondValue);
+		return;
+	}
+	RecordSource(pId, *pNearRect);
+	if(!Ui()->MouseHovered(pNearRect))
+		return;
+	const char *pCommand = QmUiConfigCommand(g_Config, pValue);
+	const char *pSecondCommand = QmUiConfigCommand(g_Config, pSecondValue);
+	if(pCommand == nullptr && pSecondCommand == nullptr)
+		return;
+	m_ConfigHints[reinterpret_cast<uintptr_t>(pId)].SetCommands(pCommand, pSecondCommand);
+	DoToolTip(pId, pNearRect, nullptr, -1.0f, 14.0f, false, true, false, true);
+}
+
+void CTooltips::DoSettingsToolTipForConfig(const void *pId, const CUIRect *pRect, const void *pConfigValue, const CUIRect *pAnchor, const void *pSecondConfigValue)
+{
+	if(Ui()->RenderOnly() || pId == nullptr || !GameClient()->m_Menus.IsSettingsPageActive())
+		return;
+	RecordSource(pId, *pRect);
+	if(!Ui()->MouseHovered(pRect))
+		return;
+	if(!m_ConfigHelpInitialized)
+	{
+		if(ConfigManager() == nullptr)
+			return;
+		// 配置变量由 ConfigManager 持有，其生命周期覆盖客户端组件；只收集一次。
+		ConfigManager()->PossibleConfigVariables("", CFGFLAG_CLIENT, [](const SConfigVariable *pVariable, void *pUser) {
+			auto &Help = *static_cast<decltype(m_ConfigHelp) *>(pUser);
+			const void *pValue = nullptr;
+			switch(pVariable->m_Type)
+			{
+			case SConfigVariable::VAR_INT:
+				pValue = static_cast<const SIntConfigVariable *>(pVariable)->m_pVariable;
+				break;
+			case SConfigVariable::VAR_COLOR:
+				pValue = static_cast<const SColorConfigVariable *>(pVariable)->m_pVariable;
+				break;
+			case SConfigVariable::VAR_STRING:
+				pValue = static_cast<const SStringConfigVariable *>(pVariable)->m_pStr;
+				break;
+			}
+			Help.emplace(pValue, pVariable); }, &m_ConfigHelp);
+		m_ConfigHelpInitialized = true;
+	}
+	const char *pCommand = QmUiConfigCommand(g_Config, pConfigValue);
+	const char *pSecondCommand = QmUiConfigCommand(g_Config, pSecondConfigValue);
+	if(pCommand == nullptr && pSecondCommand == nullptr)
+		return;
+	m_ConfigHints[reinterpret_cast<uintptr_t>(pId)].SetCommands(pCommand, pSecondCommand);
+	auto Iter = m_ConfigHelp.find(pConfigValue);
+	if(Iter == m_ConfigHelp.end())
+		Iter = m_ConfigHelp.find(pSecondConfigValue);
+	const char *pKey = nullptr;
+	if(Iter != m_ConfigHelp.end())
+	{
+		const SConfigVariable &Variable = *Iter->second;
+		pKey = Variable.m_pHelpLocalizeKey != nullptr ? Variable.m_pHelpLocalizeKey : Variable.m_pHelp;
+	}
+	const float FontSize = ResolveSettingsSmallFontSize(g_Config.m_QmUiScale / 100.0f);
+	DoToolTip(pId, pRect, pKey != nullptr ? Localize(pKey) : nullptr, -1.0f, FontSize, true, true, true, true, pAnchor);
+}
+
+void CTooltips::DoToolTip(const void *pId, const CUIRect *pNearRect, const char *pText, float WidthHint, const float FontSize, const bool SmallInstant, const bool HoverByRect, const bool Immediate, const bool Fallback, const CUIRect *pAnchor)
+{
+	if(Ui()->RenderOnly())
+		return;
+	const uintptr_t Id = reinterpret_cast<uintptr_t>(pId);
+	const auto [Entry, WasInserted] = m_Tooltips.try_emplace(Id);
 	CTooltip &Tooltip = Entry->second;
-
-	if(!WasInserted)
+	if(!WasInserted && !QmTooltipMayUpdate(Tooltip, m_Frame, Fallback, Tooltip.m_OnScreen && QmTooltipHovered(Tooltip, *Ui()), pAnchor != nullptr))
+		return;
+	const CUIRect *pClip = Ui()->IsClipped() ? Ui()->ClipArea() : nullptr;
+	QmTooltipRecordSource(Tooltip, m_Frame, *pNearRect, pClip, Ui()->MousePos());
+	if(pNearRect->w <= 0.0f || pNearRect->h <= 0.0f)
+		return;
+	auto Hint = m_ConfigHints.find(Id);
+	if(Hint == m_ConfigHints.end())
 	{
-		Tooltip.m_Rect = *pNearRect; // update in case of window resize
-		Tooltip.m_pText = pText; // update in case of language change
+		if(const char *pCommand = QmUiConfigCommand(g_Config, pId); pCommand != nullptr)
+		{
+			Hint = m_ConfigHints.try_emplace(Id).first;
+			Hint->second.SetCommands(pCommand);
+		}
+	}
+	const bool HasConfigHint = Hint != m_ConfigHints.end();
+	if(HasConfigHint)
+	{
+		// 专属说明只对当前帧有效，选项条件或页面改变后不沿用上一帧的文案。
+		if(!QmTooltipRegistered(Tooltip, m_Frame))
+			Hint->second.SetDescription("");
+		if(Fallback)
+			Hint->second.SetFallbackDescription(pText);
+		else
+			Hint->second.SetDescription(pText);
+		pText = Hint->second.Text();
+	}
+	if(pText == nullptr || pText[0] == '\0')
+	{
+		QmTooltipRecordSource(Tooltip, m_Frame, *pNearRect, pClip, Ui()->MousePos(), false);
+		return;
 	}
 
-	Tooltip.m_OnScreen = true;
+	Tooltip.m_pId = pId;
+	Tooltip.m_Rect = *pNearRect;
+	Tooltip.m_Anchor = pAnchor != nullptr ? *pAnchor : *pNearRect;
+	Tooltip.m_HasTextAnchor = pAnchor != nullptr;
+	if(Tooltip.m_Text != pText)
+		Tooltip.m_Text = pText;
+	Tooltip.m_FontSize = std::max(1.0f, FontSize);
+	Tooltip.m_WidthHint = WidthHint;
+	Tooltip.m_HoverByRect = HoverByRect || HasConfigHint;
+	Tooltip.m_Immediate = Immediate;
+	Tooltip.m_SmallInstant = SmallInstant;
+	Tooltip.m_Fallback = Fallback;
+	Tooltip.m_RegisteredFrame = m_Frame;
+	Tooltip.m_RegisteredContext = GameClient()->m_Menus.TooltipContext();
+	Tooltip.m_OnScreen = QmTooltipHovered(Tooltip, *Ui());
 
-	if(Ui()->HotItem() == Tooltip.m_pId)
-	{
+	if(Tooltip.m_OnScreen)
 		SetActiveTooltip(Tooltip);
-	}
 }
 
 void CTooltips::OnRender()
 {
-	if(m_ActiveTooltip.has_value())
+	const uint64_t Frame = m_Frame++;
+	const double Now = time_get() / static_cast<double>(time_freq());
+	const auto Context = GameClient()->m_Menus.TooltipContext();
+	if(!m_Context || *m_Context != Context)
 	{
-		CTooltip &Tooltip = m_ActiveTooltip.value();
-
-		if(Ui()->HotItem() != Tooltip.m_pId || !Tooltip.m_Rect.Inside(Ui()->MousePos()))
-		{
-			Tooltip.m_OnScreen = false;
-			ClearActiveTooltip();
-			return;
-		}
-		if(!Tooltip.m_OnScreen)
-			return;
-
-		// Reset hover time if a different tooltip is active.
-		// Only reset hover time when rendering, because multiple tooltips can be
-		// activated in the same frame, but only the last one should be rendered.
-		if(!m_PreviousTooltip.has_value() || m_PreviousTooltip.value().get().m_pText != Tooltip.m_pText)
-			m_HoverTime = time_get();
-		m_PreviousTooltip.emplace(Tooltip);
-
-		// Delay tooltip until 1 second passed. Start fade-in in the last 0.25 seconds.
-		float SecondsBeforeFadeIn = 0.75f;
-
-		SecondsBeforeFadeIn = Tooltip.m_FadeTime;
-
-		const float SecondsSinceActivation = (time_get() - m_HoverTime) / (float)time_freq();
-		if(SecondsSinceActivation < SecondsBeforeFadeIn)
-			return;
-		constexpr float SecondsFadeIn = 0.25f;
-		const float AlphaFactor = SecondsSinceActivation < SecondsBeforeFadeIn + SecondsFadeIn ? (SecondsSinceActivation - SecondsBeforeFadeIn) / SecondsFadeIn : 1.0f;
-
-		constexpr float FontSize = 14.0f;
-		constexpr float Margin = 5.0f;
-		constexpr float Padding = 5.0f;
-
-		const STextBoundingBox BoundingBox = TextRender()->TextBoundingBox(FontSize, Tooltip.m_pText, -1, Tooltip.m_WidthHint);
-		CUIRect Rect;
-		Rect.w = BoundingBox.m_W + 2 * Padding;
-		Rect.h = BoundingBox.m_H + 2 * Padding;
-
-		const CUIRect *pScreen = Ui()->Screen();
-		Rect.w = std::min(Rect.w, pScreen->w - 2 * Margin);
-		Rect.h = std::min(Rect.h, pScreen->h - 2 * Margin);
-
-		// Try the top side.
-		if(Tooltip.m_Rect.y - Rect.h - Margin > pScreen->y)
-		{
-			Rect.x = std::clamp(Ui()->MouseX() - Rect.w / 2.0f, Margin, pScreen->w - Rect.w - Margin);
-			Rect.y = Tooltip.m_Rect.y - Rect.h - Margin;
-		}
-		// Try the bottom side.
-		else if(Tooltip.m_Rect.y + Tooltip.m_Rect.h + Margin < pScreen->h)
-		{
-			Rect.x = std::clamp(Ui()->MouseX() - Rect.w / 2.0f, Margin, pScreen->w - Rect.w - Margin);
-			Rect.y = Tooltip.m_Rect.y + Tooltip.m_Rect.h + Margin;
-		}
-		// Try the right side.
-		else if(Tooltip.m_Rect.x + Tooltip.m_Rect.w + Margin + Rect.w < pScreen->w)
-		{
-			Rect.x = Tooltip.m_Rect.x + Tooltip.m_Rect.w + Margin;
-			Rect.y = std::clamp(Ui()->MouseY() - Rect.h / 2.0f, Margin, pScreen->h - Rect.h - Margin);
-		}
-		// Try the left side.
-		else if(Tooltip.m_Rect.x - Rect.w - Margin > pScreen->x)
-		{
-			Rect.x = Tooltip.m_Rect.x - Rect.w - Margin;
-			Rect.y = std::clamp(Ui()->MouseY() - Rect.h / 2.0f, Margin, pScreen->h - Rect.h - Margin);
-		}
-
-		Rect.Draw(ColorRGBA(0.2f, 0.2f, 0.2f, 0.8f * AlphaFactor), IGraphics::CORNER_ALL, Padding);
-		Rect.Margin(Padding, &Rect);
-
-		CTextCursor Cursor;
-		Cursor.SetPosition(Rect.TopLeft());
-		Cursor.m_FontSize = FontSize;
-		Cursor.m_LineWidth = Tooltip.m_WidthHint;
-
-		STextContainerIndex TextContainerIndex;
-		const unsigned OldRenderFlags = TextRender()->GetRenderFlags();
-		TextRender()->SetRenderFlags(OldRenderFlags | TEXT_RENDER_FLAG_ONE_TIME_USE);
-		TextRender()->CreateTextContainer(TextContainerIndex, &Cursor, Tooltip.m_pText);
-		TextRender()->SetRenderFlags(OldRenderFlags);
-
-		if(TextContainerIndex.Valid())
-		{
-			ColorRGBA TextColor = TextRender()->DefaultTextColor();
-			TextColor.a *= AlphaFactor;
-			ColorRGBA OutlineColor = TextRender()->DefaultTextOutlineColor();
-			OutlineColor.a *= AlphaFactor;
-			TextRender()->RenderTextContainer(TextContainerIndex, TextColor, OutlineColor);
-		}
-
-		TextRender()->DeleteTextContainer(TextContainerIndex);
-
-		Tooltip.m_OnScreen = false;
+		ResetPresentation();
+		m_Context = Context;
 	}
+	if(!Ui()->Enabled() || Ui()->PointerInputBlocked())
+	{
+		ClearActiveTooltip();
+		return;
+	}
+
+	const bool LabelHintActive = QmTooltipActive(m_CardLabelHint, Frame, Context, *Ui());
+	const CTooltip *pTarget = m_ActiveTooltip && QmTooltipActive(m_ActiveTooltip->get(), Frame, Context, *Ui()) ? &m_ActiveTooltip->get() : nullptr;
+	if(pTarget == nullptr && LabelHintActive)
+		pTarget = &m_CardLabelHint;
+	if(pTarget != nullptr)
+	{
+		// 只处理本帧最终目标，保留专属帮助和配置命令，再补充当前标签的括号说明。
+		if(m_HoverState.Update(*pTarget, Now) < 0.0f)
+			return;
+		m_DisplayTooltip = *pTarget;
+		if(LabelHintActive && m_DisplayTooltip.m_Text.find(m_CardLabelHint.m_Text) == std::string::npos)
+		{
+			m_DisplayTooltip.m_Text += '\n';
+			m_DisplayTooltip.m_Text += m_CardLabelHint.m_Text;
+		}
+	}
+	else
+	{
+		m_ActiveTooltip.reset();
+		const auto Source = m_Tooltips.find(reinterpret_cast<uintptr_t>(m_DisplayTooltip.m_pId));
+		const CTooltip *pSource = m_DisplayTooltip.m_pId != nullptr && m_DisplayTooltip.m_pId == m_CardLabelHint.m_pId ? &m_CardLabelHint :
+																 (Source != m_Tooltips.end() ? &Source->second : nullptr);
+		if(!m_HoverState.Retain(Now, pSource, Frame))
+		{
+			ResetPresentation();
+			return;
+		}
+	}
+
+	const CTooltip &Tooltip = m_DisplayTooltip;
+	const float VisibleSeconds = m_HoverState.VisibleSeconds(Now);
+	const bool MotionEnabled = g_Config.m_QmTooltipAnimation && g_Config.m_QmUiMotionLevel > 0;
+	const bool Animate = QmTooltipAnimate(Tooltip, MotionEnabled);
+	const float SecondsFadeIn = !Animate || Tooltip.m_Immediate ? 0.0f : CQmTooltipHoverState::FADE_IN_SECONDS;
+	const float AlphaFactor = SecondsFadeIn > 0.0f ? std::min(VisibleSeconds / SecondsFadeIn, 1.0f) : 1.0f;
+	CUiScopedGaussianBlur GaussianBlurScope(Ui(), AlphaFactor);
+	CQmTooltipTextScope TextScope(*TextRender());
+
+	const float BaseFontSize = Tooltip.m_FontSize * (Tooltip.m_SmallInstant ? 1.0f : std::clamp(g_Config.m_QmTooltipFontSize, 10, 24) / 14.0f);
+	const float UiScale = Tooltip.m_SmallInstant ? BaseFontSize / 10.0f : 1.0f;
+	const float Margin = (Tooltip.m_SmallInstant ? 4.0f : 5.0f) * UiScale;
+	const float BasePadding = (Tooltip.m_SmallInstant ? 3.0f : 5.0f) * UiScale;
+	const CUIRect *pScreen = Ui()->Screen();
+	const float WidthLimit = Tooltip.m_WidthHint > 0.0f ? Tooltip.m_WidthHint : 300.0f * UiScale;
+	const SQmTooltipTextLayout Layout = QmTooltipMeasureText(*TextRender(), Tooltip.m_Text.c_str(), BaseFontSize, WidthLimit,
+		vec2(std::max(0.0f, pScreen->w - 2.0f * Margin), std::max(0.0f, pScreen->h - 2.0f * Margin)), BasePadding);
+	if(Layout.m_VisibleLines <= 0)
+		return;
+	const CUIRect FixedRect = QmTooltipRect(Tooltip.m_Anchor, *pScreen, Layout.m_Size, Margin);
+	if(FixedRect.w <= 0.0f || FixedRect.h <= 0.0f)
+		return;
+	const CUIRect MovingRect = m_MotionState.Update(FixedRect, Now, MotionEnabled);
+	const CUIRect Rect = QmTooltipAnimatedRect(MovingRect, *pScreen, QmTooltipScale(VisibleSeconds, Animate));
+	const float Scale = QmTooltipTextScale(FixedRect, Rect);
+	if(Scale <= 0.0f)
+		return;
+	ColorRGBA Background = color_cast<ColorRGBA>(ColorHSLA(g_Config.m_QmTooltipBackgroundColor, true));
+	Background.a *= AlphaFactor;
+	Rect.Draw(Background, IGraphics::CORNER_ALL, (Tooltip.m_SmallInstant ? 3.0f * UiScale : Layout.m_Padding) * Scale);
+
+	const vec2 TextPosition(Layout.m_Padding + Layout.m_TextOffsetX, Layout.m_Padding + Layout.m_TextOffsetY);
+	const CTextCursor Cursor = QmTooltipTextCursor({}, BaseFontSize, Layout.m_LineWidth, Layout.m_Truncated ? std::max(1, Layout.m_VisibleLines - 1) : 0);
+	m_TextCache.Update(*TextRender(), Cursor, Tooltip.m_Text);
+	STextContainerIndex EllipsisIndex;
+	if(Layout.m_Truncated)
+		QmTooltipCreateText(*TextRender(), Layout, "…", TextPosition + vec2(0.0f, (Layout.m_VisibleLines - 1) * Layout.m_LineHeight), EllipsisIndex, true);
+
+	ColorRGBA TextColor = color_cast<ColorRGBA>(ColorHSLA(g_Config.m_QmTooltipTextColor, true));
+	TextColor.a *= AlphaFactor;
+	ColorRGBA OutlineColor = TextRender()->DefaultTextOutlineColor();
+	OutlineColor.a *= AlphaFactor;
+	// 字形下伸部与描边可使用完整气泡内边距；动画只改变投影，不重新断行。
+	const CUIRect ClipRect = Rect;
+	Ui()->ClipEnable(&ClipRect);
+	float X0, Y0, X1, Y1;
+	Graphics()->GetScreen(&X0, &Y0, &X1, &Y1);
+	const CUIRect Projection = QmTooltipTextProjection({X0, Y0, X1 - X0, Y1 - Y0}, FixedRect, Rect);
+	Graphics()->MapScreen(Projection.x, Projection.y, Projection.x + Projection.w, Projection.y + Projection.h);
+	if(m_TextCache.Index().Valid() && (!Layout.m_Truncated || Layout.m_VisibleLines > 1))
+		TextRender()->RenderTextContainer(m_TextCache.Index(), TextColor, OutlineColor, FixedRect.x + TextPosition.x, FixedRect.y + TextPosition.y);
+	if(EllipsisIndex.Valid())
+		TextRender()->RenderTextContainer(EllipsisIndex, TextColor, OutlineColor, FixedRect.x, FixedRect.y);
+	Graphics()->MapScreen(X0, Y0, X1, Y1);
+	Ui()->ClipDisable();
+	TextRender()->DeleteTextContainer(EllipsisIndex);
 }

@@ -27,6 +27,11 @@
 
 #include "backend_sdl.h"
 
+bool CGraphicsBackend_SDL_GL::SupportsUiGlass()
+{
+	return m_BackendType == BACKEND_TYPE_OPENGL && g_Config.m_GfxGLMajor >= 3;
+}
+
 #if defined(CONF_HEADLESS_CLIENT)
 #include "backend/null/backend_null.h"
 #endif

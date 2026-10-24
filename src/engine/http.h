@@ -28,6 +28,7 @@ enum class EHttpState
 
 enum class HTTPLOG
 {
+	// Always suppress request logs, including global HTTP debug output.
 	NONE,
 	FAILURE,
 	ALL,
@@ -140,7 +141,7 @@ protected:
 	static const char *GetRequestType(REQUEST Type);
 
 	// Request
-	char m_aUrl[256] = "";
+	char m_aUrl[1024] = "";
 	REQUEST m_Type = REQUEST::GET;
 	unsigned char *m_pBody = nullptr;
 	size_t m_BodyLength = 0;

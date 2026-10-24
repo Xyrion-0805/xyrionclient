@@ -31,6 +31,7 @@ public:
 	int Sizeof() const override { return sizeof(*this); }
 	void OnInit() override;
 	void OnRender() override;
+	void RenderCustom(vec2 Center, float Zoom);
 	void OnMapLoad() override;
 
 	virtual CCamera *GetCurCamera();

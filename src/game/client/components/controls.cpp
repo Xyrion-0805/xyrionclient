@@ -17,6 +17,7 @@
 #include <game/client/components/menus.h>
 #include <game/client/components/scoreboard.h>
 #include <game/client/gameclient.h>
+#include <game/client/components/bestclient/inputs.h>
 #include <game/collision.h>
 
 #include <algorithm>
@@ -115,6 +116,10 @@ void CControls::ConKeyInputNextPrevWeapon(IConsole::IResult *pResult, void *pUse
 
 void CControls::OnConsoleInit()
 {
+	{
+		static CInputState s_State = {this, {&m_aShowWeaponTrajectory[0], &m_aShowWeaponTrajectory[1]}};
+		Console()->Register("+showweapontrajectory", "", CFGFLAG_CLIENT, ConKeyInputState, &s_State, "Show weapon trajectory guide");
+	}
 	// game commands
 	{
 		static CInputState s_State = {this, {&m_aInputDirectionLeft[0], &m_aInputDirectionLeft[1]}};
@@ -283,11 +288,8 @@ int CControls::SnapInput(int *pData)
 			m_aInputData[g_Config.m_ClDummy].m_TargetX = 1;
 
 		// set direction
-		m_aInputData[g_Config.m_ClDummy].m_Direction = 0;
-		if(m_aInputDirectionLeft[g_Config.m_ClDummy] && !m_aInputDirectionRight[g_Config.m_ClDummy])
-			m_aInputData[g_Config.m_ClDummy].m_Direction = -1;
-		if(!m_aInputDirectionLeft[g_Config.m_ClDummy] && m_aInputDirectionRight[g_Config.m_ClDummy])
-			m_aInputData[g_Config.m_ClDummy].m_Direction = 1;
+		m_aInputData[g_Config.m_ClDummy].m_Direction = GameClient()->m_SnapTap.ResolveMovementDirection(g_Config.m_ClDummy,
+			m_aInputDirectionLeft[g_Config.m_ClDummy] != 0, m_aInputDirectionRight[g_Config.m_ClDummy] != 0, true);
 
 		// dummy copy moves
 		if(g_Config.m_ClDummyCopyMoves)
@@ -513,17 +515,37 @@ float CControls::GetMaxMouseDistance() const
 
 bool CControls::CheckNewInput()
 {
+	if(g_Config.m_BcInputs == BC_INPUTS_SAIKO && g_Config.m_BcSaikoInputAmount > 0)
+	{
+		CNetObj_PlayerInput TestInput = m_aInputData[g_Config.m_ClDummy];
+		TestInput.m_Direction = GameClient()->m_SnapTap.ResolveMovementDirection(g_Config.m_ClDummy,
+			m_aInputDirectionLeft[g_Config.m_ClDummy] != 0, m_aInputDirectionRight[g_Config.m_ClDummy] != 0, false);
+		bool NewInput = false;
+		if(m_aFastInput[g_Config.m_ClDummy].m_Direction != TestInput.m_Direction ||
+			m_aFastInput[g_Config.m_ClDummy].m_Hook != TestInput.m_Hook ||
+			m_aFastInput[g_Config.m_ClDummy].m_Fire != TestInput.m_Fire ||
+			m_aFastInput[g_Config.m_ClDummy].m_Jump != TestInput.m_Jump ||
+			m_aFastInput[g_Config.m_ClDummy].m_NextWeapon != TestInput.m_NextWeapon ||
+			m_aFastInput[g_Config.m_ClDummy].m_PrevWeapon != TestInput.m_PrevWeapon ||
+			m_aFastInput[g_Config.m_ClDummy].m_WantedWeapon != TestInput.m_WantedWeapon)
+			NewInput = true;
+		if(g_Config.m_ClSubTickAiming)
+		{
+			TestInput.m_TargetX = (int)m_aMousePos[g_Config.m_ClDummy].x;
+			TestInput.m_TargetY = (int)m_aMousePos[g_Config.m_ClDummy].y;
+		}
+		m_aFastInput[g_Config.m_ClDummy] = TestInput;
+		return NewInput;
+	}
+
 	bool NewInput[2] = {};
 	for(int Dummy = 0; Dummy < NUM_DUMMIES; Dummy++)
 	{
 		CNetObj_PlayerInput TestInput = m_aInputData[Dummy];
 		if(Dummy == g_Config.m_ClDummy)
 		{
-			TestInput.m_Direction = 0;
-			if(m_aInputDirectionLeft[Dummy] && !m_aInputDirectionRight[Dummy])
-				TestInput.m_Direction = -1;
-			if(!m_aInputDirectionLeft[Dummy] && m_aInputDirectionRight[Dummy])
-				TestInput.m_Direction = 1;
+			TestInput.m_Direction = GameClient()->m_SnapTap.ResolveMovementDirection(Dummy,
+				m_aInputDirectionLeft[Dummy] != 0, m_aInputDirectionRight[Dummy] != 0, false);
 		}
 
 		if(m_aFastInput[Dummy].m_Direction != TestInput.m_Direction)

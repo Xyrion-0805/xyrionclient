@@ -5,6 +5,7 @@
 #include <base/dbg.h>
 #include <base/math.h>
 #include <base/str.h>
+#include <base/time.h>
 
 #include <engine/graphics.h>
 #include <engine/shared/config.h>
@@ -13,6 +14,8 @@
 #include <game/client/gameclient.h>
 #include <game/client/ui.h>
 #include <game/localization.h>
+
+#include <algorithm>
 
 void CMenus::SetNeedSendInfo()
 {
@@ -24,6 +27,12 @@ void CMenus::SetNeedSendInfo()
 
 void CMenus::RenderSettings(CUIRect MainView)
 {
+	if(m_AssetsEditorState.m_Open && g_Config.m_UiSettingsPage == SETTINGS_ASSETS)
+	{
+		MainView.Margin(20.0f, &MainView);
+		RenderSettingsAssets(MainView);
+		return;
+	}
 	// render background
 	CUIRect Button, TabBar, RestartBar;
 	MainView.VSplitRight(120.0f, &MainView, &TabBar);
@@ -52,15 +61,20 @@ void CMenus::RenderSettings(CUIRect MainView)
 		Localize("DDNet"),
 		Localize("Assets"),
 		TCLocalize("TClient"), // TClient
+		"Xyrion",
+		TCLocalize("Mod 管理器"),
 		Localize("Profiles"), // TClient
 		Localize("Configs"), // TClient
 		Localize("Credits")};
 	static CButtonContainer s_aTabButtons[SETTINGS_LENGTH];
+	const float TabGap = 4.0f;
+	const float TabHeight = std::min(26.0f, (TabBar.h - TabGap * float(SETTINGS_LENGTH - 1)) / float(SETTINGS_LENGTH - 1));
 
 	for(int i = 0; i < SETTINGS_LENGTH; i++)
 	{
-		TabBar.HSplitTop(10.0f, nullptr, &TabBar);
-		TabBar.HSplitTop(26.0f, &Button, &TabBar);
+		if(i == SETTINGS_MODS) continue;
+		TabBar.HSplitTop(TabGap, nullptr, &TabBar);
+		TabBar.HSplitTop(TabHeight, &Button, &TabBar);
 		if(DoButton_MenuTab(&s_aTabButtons[i], apTabs[i], g_Config.m_UiSettingsPage == i, &Button, IGraphics::CORNER_R, &m_aAnimatorsSettingsTab[i]))
 			g_Config.m_UiSettingsPage = i;
 	}
@@ -127,6 +141,18 @@ void CMenus::RenderSettings(CUIRect MainView)
 	{
 		GameClient()->m_MenuBackground.ChangePosition(CMenuBackground::POS_SETTINGS_GENERAL);
 		RenderSettingsTClientProfiles(MainView);
+	}
+	else if(g_Config.m_UiSettingsPage == SETTINGS_XYRION)
+	{
+		GameClient()->m_MenuBackground.ChangePosition(CMenuBackground::POS_SETTINGS_GENERAL);
+		RenderSettingsXyrion(MainView);
+	}
+	else if(g_Config.m_UiSettingsPage == SETTINGS_MODS)
+	{
+		GameClient()->m_MenuBackground.ChangePosition(CMenuBackground::POS_SETTINGS_GENERAL);
+		g_Config.m_XcSettingsTab = 2;
+		g_Config.m_UiSettingsPage = SETTINGS_XYRION;
+		RenderSettingsXyrion(MainView);
 	}
 	else if(g_Config.m_UiSettingsPage == SETTINGS_CONFIGS) // TClient
 	{

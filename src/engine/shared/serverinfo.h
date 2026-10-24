@@ -42,6 +42,10 @@ public:
 	char m_aGameType[16];
 	char m_aName[64];
 	char m_aMapName[MAX_MAP_LENGTH];
+	bool m_HasMapSha256;
+	SHA256_DIGEST m_MapSha256;
+	int m_MapSize;
+	char m_aMapUrl[256];
 	char m_aVersion[32];
 	bool m_RequiresLogin;
 

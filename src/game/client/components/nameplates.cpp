@@ -752,6 +752,7 @@ private:
 
 public:
 	CNamePlate() = default;
+	bool IsInited() const { return m_Inited; }
 	CNamePlate(CGameClient &This, const CNamePlateData &Data)
 	{
 		// Convenience constructor
@@ -1078,6 +1079,14 @@ void CNamePlates::ResetNamePlates()
 {
 	for(CNamePlate &NamePlate : m_pData->m_aNamePlates)
 		NamePlate.Reset(*GameClient());
+}
+
+// Imported from BestClient for chat bubble placement.
+float CNamePlates::GetNamePlateOffset(int ClientId) const
+{
+	if(!m_pData || ClientId < 0 || ClientId >= MAX_CLIENTS) return 0;
+	const CNamePlate &Plate = m_pData->m_aNamePlates[ClientId];
+	return Plate.IsInited() ? Plate.Size().y : 0;
 }
 
 void CNamePlates::OnRender()

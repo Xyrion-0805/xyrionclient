@@ -151,6 +151,10 @@ public:
 			{
 				Texture.Invalidate();
 			}
+			for(auto &pSource : m_apChatAvatarOriginal)
+				pSource.reset();
+			for(auto &pSource : m_apChatAvatarColorable)
+				pSource.reset();
 			std::fill(std::begin(m_aUseCustomColors), std::end(m_aUseCustomColors), false);
 			std::fill(std::begin(m_aColors), std::end(m_aColors), ColorRGBA(1.0f, 1.0f, 1.0f, 1.0f));
 			m_BloodColor = ColorRGBA(1.0f, 1.0f, 1.0f, 1.0f);
@@ -162,6 +166,8 @@ public:
 
 		IGraphics::CTextureHandle m_aOriginalTextures[protocol7::NUM_SKINPARTS];
 		IGraphics::CTextureHandle m_aColorableTextures[protocol7::NUM_SKINPARTS];
+		std::shared_ptr<const QmChatAvatar::SSource> m_apChatAvatarOriginal[protocol7::NUM_SKINPARTS];
+		std::shared_ptr<const QmChatAvatar::SSource> m_apChatAvatarColorable[protocol7::NUM_SKINPARTS];
 		bool m_aUseCustomColors[protocol7::NUM_SKINPARTS];
 		ColorRGBA m_aColors[protocol7::NUM_SKINPARTS];
 		ColorRGBA m_BloodColor;

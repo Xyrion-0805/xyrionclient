@@ -1,6 +1,8 @@
 /* (c) Magnus Auvinen. See licence.txt in the root of the distribution for more information. */
 /* If you are missing that file, acquire a complete release at teeworlds.com.                */
 #include "hud.h"
+#include <game/client/QmUi/UiTokens.h>
+#include <game/client/components/qmclient/gores_drown_tracker.h>
 
 #include "binds.h"
 #include "camera.h"
@@ -68,13 +70,20 @@ void CHud::ResetHudContainers()
 	}
 }
 
+void CHud::OnShutdown()
+{
+	DestroyDummyMiniViewRenderTarget();
+}
+
 void CHud::OnWindowResize()
 {
+	DestroyDummyMiniViewRenderTarget();
 	ResetHudContainers();
 }
 
 void CHud::OnReset()
 {
+	DestroyDummyMiniViewRenderTarget();
 	m_TimeCpDiff = 0.0f;
 	m_DDRaceTime = 0;
 	m_FinishTimeLastReceivedTick = 0;
@@ -119,6 +128,8 @@ void CHud::OnInit()
 
 void CHud::RenderGameTimer()
 {
+	// BestClient displays the timer in the top music HUD.
+	if(g_Config.m_BcMusicPlayer && !g_Config.m_ClEditor && !GameClient()->m_Menus.IsActive()) return;
 	float Half = m_Width / 2.0f;
 
 	if(!(GameClient()->m_Snap.m_pGameInfoObj->m_GameStateFlags & GAMESTATEFLAG_SUDDENDEATH))
@@ -2041,6 +2052,8 @@ void CHud::OnRender()
 		RenderSuddenDeath();
 		if(g_Config.m_ClShowhudScore)
 			RenderScoreHud();
+		RenderGoresDrownBoard();
+		RenderDummyMiniMap();
 		RenderDummyActions();
 		RenderWarmupTimer();
 		RenderTextInfo();
@@ -2053,7 +2066,9 @@ void CHud::OnRender()
 		if(g_Config.m_ClShowRecord)
 			RenderRecord();
 	}
+	GameClient()->m_AspectRatio.BeginCursorGameAspect();
 	RenderCursor();
+	GameClient()->m_AspectRatio.EndCursorGameAspect();
 }
 
 void CHud::OnMessage(int MsgType, void *pRawMsg)
@@ -2195,6 +2210,149 @@ void CHud::RenderDDRaceEffects()
 			TextRender()->TextColor(TextRender()->DefaultTextColor());
 		}
 	}
+}
+
+void CHud::RenderGoresDrownBoard()
+{
+	if(!g_Config.m_QmGoresDrownBoard || !GameClient()->m_TClient.IsGoresDrownBoardMode())
+		return;
+
+	const bool Preview = false;
+
+	const float BoardAlpha = std::clamp(g_Config.m_QmGoresDrownBoardOpacity / 100.0f, 0.0f, 1.0f);
+	if(BoardAlpha <= 0.0f && !Preview)
+		return;
+	// 编辑器中即使透明度被调到 0，也保留一个可选中的预览卡片。
+	const float RenderAlpha = Preview ? std::max(BoardAlpha, 0.55f) : BoardAlpha;
+
+	const int LocalId = GameClient()->m_aLocalIds[g_Config.m_ClDummy] >= 0 ? GameClient()->m_aLocalIds[g_Config.m_ClDummy] : GameClient()->m_Snap.m_LocalClientId;
+	const bool HasLocalClient = LocalId >= 0 && LocalId < MAX_CLIENTS && GameClient()->m_aClients[LocalId].m_Active && GameClient()->m_Snap.m_apPlayerInfos[LocalId] != nullptr;
+	const int LocalTeam = HasLocalClient ? GameClient()->m_Teams.Team(LocalId) : -1;
+	const bool IncludeTeamZero = false;
+	if(!Preview && !CQmGoresDrownTracker::IsBoardVisible(GameClient()->m_TClient.IsGoresDrownBoardMode(), HasLocalClient, LocalTeam, IncludeTeamZero))
+		return;
+
+	struct SEntry
+	{
+		int m_ClientId;
+		int m_Count;
+	};
+	std::vector<SEntry> vEntries;
+	for(int ClientId = 0; ClientId < MAX_CLIENTS; ++ClientId)
+	{
+		if(!GameClient()->m_aClients[ClientId].m_Active ||
+			!GameClient()->m_Snap.m_apPlayerInfos[ClientId] ||
+			!CQmGoresDrownTracker::IsSameTrackedTeam(LocalTeam, GameClient()->m_Teams.Team(ClientId), IncludeTeamZero))
+			continue;
+		vEntries.push_back({ClientId, GameClient()->m_TClient.GetGoresDrownCount(ClientId)});
+	}
+	if(vEntries.empty() && Preview)
+		vEntries.push_back({-1, 0});
+	if(vEntries.empty())
+		return;
+
+	std::stable_sort(vEntries.begin(), vEntries.end(), [](const SEntry &Left, const SEntry &Right) {
+		if(Left.m_Count != Right.m_Count)
+			return Left.m_Count > Right.m_Count;
+		return Left.m_ClientId < Right.m_ClientId;
+	});
+
+	const int MaxRows = std::clamp(g_Config.m_QmGoresDrownBoardMaxPlayers, 1, 16);
+	const int RowCount = std::min((int)vEntries.size(), MaxRows);
+	const bool HasMoreRows = (int)vEntries.size() > RowCount;
+	const bool ShowTee = g_Config.m_QmGoresDrownBoardShowTee != 0;
+	const char *pTitle = Localize("Drown deaths");
+	constexpr float TitleFontSize = ui_token::hud::font::BODY;
+	constexpr float RowFontSize = ui_token::hud::font::CAPTION;
+	constexpr float MoreFontSize = ui_token::hud::font::CAPTION;
+	constexpr float PaddingX = 5.0f;
+	constexpr float PaddingY = 4.0f;
+	constexpr float TitleHeight = TitleFontSize + 2.0f;
+	constexpr float RowHeight = RowFontSize + 3.0f;
+	constexpr float MoreHeight = MoreFontSize + 2.0f;
+	constexpr float TeeSize = 8.0f;
+	constexpr float TeeGap = 2.0f;
+	constexpr float CountGap = 4.0f;
+	const float TeeColumnWidth = ShowTee ? TeeSize + TeeGap : 0.0f;
+
+	float BoardWidth = TextRender()->TextWidth(TitleFontSize, pTitle);
+	for(int Index = 0; Index < RowCount; ++Index)
+	{
+		char aCount[16];
+		const char *pName = vEntries[Index].m_ClientId >= 0 ? GameClient()->m_aClients[vEntries[Index].m_ClientId].m_aName : Localize("Teammate");
+		str_format(aCount, sizeof(aCount), "%d", vEntries[Index].m_Count);
+		BoardWidth = std::max(BoardWidth, TeeColumnWidth + TextRender()->TextWidth(RowFontSize, pName) + CountGap + TextRender()->TextWidth(RowFontSize, aCount));
+	}
+	if(HasMoreRows)
+		BoardWidth = std::max(BoardWidth, TextRender()->TextWidth(MoreFontSize, Localize("More teammates...")));
+
+	BoardWidth = std::max(BoardWidth + PaddingX * 2.0f, 64.0f) + 2.0f;
+	const float BoardHeight = PaddingY * 2.0f + TitleHeight + RowCount * RowHeight + (HasMoreRows ? MoreHeight : 0.0f);
+	const float BoardX = std::clamp(8.0f, 0.0f, std::max(0.0f, m_Width - BoardWidth));
+	const float BoardY = 35.0f;
+	const CUIRect BoardRect{BoardX, BoardY, BoardWidth, BoardHeight};
+
+	Ui()->RenderGaussianBlur(BoardRect, 1.0f, IGraphics::CORNER_ALL, ui_token::radius::BASE);
+	ColorRGBA BackgroundColor = ui_token::color::SURFACE_GLASS;
+	BackgroundColor.a *= RenderAlpha;
+	Graphics()->DrawRect(BoardX, BoardY, BoardWidth, BoardHeight, BackgroundColor, IGraphics::CORNER_ALL, ui_token::radius::BASE);
+
+	const ColorRGBA PreviousTextColor = TextRender()->GetTextColor();
+	const ColorRGBA PreviousOutlineColor = TextRender()->GetTextOutlineColor();
+	// 榜内文字保持可读性：透明度只作用于榜面和 Tee，不能把排名信息一起淡掉。
+	const ColorRGBA BoardTextColor = TextRender()->DefaultTextColor();
+	const ColorRGBA BoardOutlineColor = TextRender()->DefaultTextOutlineColor();
+	TextRender()->TextColor(BoardTextColor);
+	TextRender()->TextOutlineColor(BoardOutlineColor);
+
+	const float ContentCenterX = BoardX + BoardWidth / 2.0f;
+	const float RowLeft = BoardX + PaddingX;
+	const float RowRight = BoardX + BoardWidth - PaddingX;
+	TextRender()->Text(ContentCenterX - TextRender()->TextWidth(TitleFontSize, pTitle) / 2.0f, BoardY + PaddingY, TitleFontSize, pTitle);
+	for(int Index = 0; Index < RowCount; ++Index)
+	{
+		char aCount[16];
+		const int ClientId = vEntries[Index].m_ClientId;
+		const char *pName = ClientId >= 0 ? GameClient()->m_aClients[ClientId].m_aName : Localize("Teammate");
+		str_format(aCount, sizeof(aCount), "%d", vEntries[Index].m_Count);
+		const float Y = BoardY + PaddingY + TitleHeight + Index * RowHeight;
+		const float CountWidth = TextRender()->TextWidth(RowFontSize, aCount);
+		CTextCursor NameCursor;
+		NameCursor.SetPosition(vec2(RowLeft + TeeColumnWidth, Y));
+		NameCursor.m_FontSize = RowFontSize;
+		NameCursor.m_CalculateVisualBoundingBox = ShowTee && ClientId >= 0;
+		TextRender()->TextEx(&NameCursor, pName);
+		if(ShowTee && ClientId >= 0)
+		{
+			CTeeRenderInfo TeeInfo = GameClient()->m_aClients[ClientId].m_RenderInfo;
+			TeeInfo.m_Size = TeeSize;
+			const CAnimState *pIdleState = CAnimState::GetIdle();
+			float AnimScale, BaseSize;
+			CRenderTools::GetRenderTeeAnimScaleAndBaseSize(&TeeInfo, AnimScale, BaseSize);
+			float FeetBottom = BaseSize / 4.2f;
+			if(!TeeInfo.m_aSixup[g_Config.m_ClDummy].PartTexture(protocol7::SKINPART_BODY).IsValid())
+			{
+				vec2 FeetOffset;
+				float FeetWidth, FeetHeight;
+				CRenderTools::GetRenderTeeFeetSize(pIdleState, &TeeInfo, FeetOffset, FeetWidth, FeetHeight);
+				FeetBottom = -BaseSize * 0.25f + FeetOffset.y + FeetHeight;
+			}
+			FeetBottom += std::max(pIdleState->GetFrontFoot()->m_Y, pIdleState->GetBackFoot()->m_Y) * AnimScale;
+			// 用名字的可见底边和脚部贴图边界确定落脚平面。
+			const float TextBottom = NameCursor.m_HasVisualBoundingBox ? NameCursor.m_VisualBottom : Y + RowFontSize;
+			RenderTools()->RenderTee(pIdleState, &TeeInfo, EMOTE_NORMAL, vec2(1.0f, 0.0f), vec2(RowLeft + TeeSize / 2.0f, TextBottom - FeetBottom), RenderAlpha);
+		}
+		TextRender()->Text(RowRight - CountWidth, Y, RowFontSize, aCount);
+	}
+	if(HasMoreRows)
+	{
+		const char *pMore = Localize("More teammates...");
+		TextRender()->TextColor(BoardTextColor.WithMultipliedAlpha(0.65f));
+		TextRender()->Text(ContentCenterX - TextRender()->TextWidth(MoreFontSize, pMore) / 2.0f, BoardY + PaddingY + TitleHeight + RowCount * RowHeight, MoreFontSize, pMore);
+	}
+
+	TextRender()->TextColor(PreviousTextColor);
+	TextRender()->TextOutlineColor(PreviousOutlineColor);
 }
 
 void CHud::RenderRecord()

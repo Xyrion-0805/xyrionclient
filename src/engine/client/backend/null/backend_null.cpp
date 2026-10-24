@@ -16,6 +16,9 @@ ERunCommandReturnTypes CCommandProcessorFragment_Null::RunCommand(const CCommand
 	case CCommandBuffer::CMD_TEXTURE_CREATE:
 		Cmd_Texture_Create(static_cast<const CCommandBuffer::SCommand_Texture_Create *>(pBaseCommand));
 		break;
+	case CCommandBuffer::CMD_TEXTURE_UPDATE:
+		free(static_cast<const CCommandBuffer::SCommand_Texture_Update *>(pBaseCommand)->m_pData);
+		break;
 	case CCommandBuffer::CMD_TEXT_TEXTURES_CREATE:
 		Cmd_TextTextures_Create(static_cast<const CCommandBuffer::SCommand_TextTextures_Create *>(pBaseCommand));
 		break;

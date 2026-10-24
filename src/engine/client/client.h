@@ -3,6 +3,7 @@
 #ifndef ENGINE_CLIENT_CLIENT_H
 #define ENGINE_CLIENT_CLIENT_H
 
+#include "dummy_session.h"
 #include "graph.h"
 #include "smooth_time.h"
 
@@ -78,6 +79,10 @@ class CClient : public IClient, public CDemoPlayer::IListener
 	IUpdater *m_pUpdater = nullptr;
 
 	CNetClient m_aNetClient[NUM_CONNS];
+	// Swap indices rather than copying CNetClient: it owns socket/unpacker state.
+	int m_aNetClientSlots[NUM_CONNS] = {0, 1, 2, 3, 4};
+	CNetClient &NetClient(int Conn) { return m_aNetClient[m_aNetClientSlots[Conn]]; }
+	const CNetClient &NetClient(int Conn) const { return m_aNetClient[m_aNetClientSlots[Conn]]; }
 	CDemoPlayer m_DemoPlayer;
 	CDemoRecorder m_aDemoRecorders[RECORDER_MAX];
 	CDemoRecorder m_aDemoRecordersSixup[RECORDER_MAX];
@@ -189,6 +194,16 @@ class CClient : public IClient, public CDemoPlayer::IListener
 	bool m_DummyConnecting = false;
 	bool m_DummyConnected = false;
 	float m_LastDummyConnectTime = 0.0f;
+	static constexpr int MAX_DUMMY_CONNECTIONS = 3;
+	CDummySession m_aDummySessions[MAX_DUMMY_CONNECTIONS];
+	int m_PendingDummySelection = -1;
+	int m_PendingDummyDisconnect = -1;
+	bool m_ActivateSelectedDummy = false;
+	int m_RestoreDummyCount = 0;
+	int m_RestoreDummySelected = 0;
+	bool m_aAdditionalDummyConnecting[MAX_DUMMY_CONNECTIONS - 1] = {false, false};
+	bool m_aAdditionalDummyConnected[MAX_DUMMY_CONNECTIONS - 1] = {false, false};
+	bool m_aAdditionalDummySendConnInfo[MAX_DUMMY_CONNECTIONS - 1] = {false, false};
 	bool m_DummyReconnectOnReload = false;
 	bool m_DummyDeactivateOnReconnect = false;
 #if defined(CONF_PLATFORM_IOS)
@@ -351,6 +366,16 @@ public:
 	bool DummyConnected() const override;
 	bool DummyConnecting() const override;
 	bool DummyConnectingDelayed() const override;
+	int DummyConnectedCount() const override;
+	int DummyConnectionLimit() const override { return MAX_DUMMY_CONNECTIONS; }
+	bool DummyIsConnected(int Number) const override;
+	int DummySelected() const override { return g_Config.m_ClDummy ? m_aNetClientSlots[CONN_DUMMY] : 0; }
+	void DummySelect(int Number) override;
+	void DummyDisconnectNumber(int Number) override;
+	void DisconnectDummyConnection(int Conn, const char *pReason);
+	void SelectDummyConnection(int Conn, bool TakeControl);
+	void SendDummyInput(int Conn, bool ResetAck = false);
+	void ProcessDummyPacket(CNetChunk *pPacket, int Conn);
 	bool DummyAllowed() const override;
 
 	const CServerInfo &ServerInfo() const override;
@@ -393,6 +418,8 @@ public:
 	void ProcessConnlessPacket(CNetChunk *pPacket);
 	void ProcessServerInfo(int Type, NETADDR *pFrom, const void *pData, int DataSize);
 	void ProcessServerPacket(CNetChunk *pPacket, int Conn, bool Dummy);
+	void SendExtraDummyInfo(int Conn);
+	const char *DummyConnectionName(int Number);
 
 	int UnpackAndValidateSnapshot(CSnapshot *pFrom, CSnapshotBuffer *pTo);
 
@@ -406,7 +433,7 @@ public:
 
 	bool IsSixup() const override { return m_Sixup; }
 
-	const NETADDR &ServerAddress() const override { return *m_aNetClient[CONN_MAIN].ServerAddress(); }
+	const NETADDR &ServerAddress() const override { return *NetClient(CONN_MAIN).ServerAddress(); }
 	int ConnectNetTypes() const override;
 	const char *ConnectAddressString() const override { return m_aConnectAddressStr; }
 	const char *MapDownloadName() const override { return m_aMapdownloadName; }
@@ -434,6 +461,8 @@ public:
 
 	static void Con_DummyConnect(IConsole::IResult *pResult, void *pUserData);
 	static void Con_DummyDisconnect(IConsole::IResult *pResult, void *pUserData);
+	static void Con_DummySelect(IConsole::IResult *pResult, void *pUserData);
+	static void Con_DummyStatus(IConsole::IResult *pResult, void *pUserData);
 	static void Con_DummyResetInput(IConsole::IResult *pResult, void *pUserData);
 
 	static void Con_Quit(IConsole::IResult *pResult, void *pUserData);

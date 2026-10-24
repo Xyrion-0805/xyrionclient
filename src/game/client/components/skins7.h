@@ -42,6 +42,8 @@ public:
 		char m_aName[24];
 		IGraphics::CTextureHandle m_OriginalTexture;
 		IGraphics::CTextureHandle m_ColorableTexture;
+		std::shared_ptr<const QmChatAvatar::SSource> m_pChatAvatarOriginal;
+		std::shared_ptr<const QmChatAvatar::SSource> m_pChatAvatarColorable;
 		ColorRGBA m_BloodColor;
 
 		void ApplyTo(CTeeRenderInfo::CSixup &SixupRenderInfo) const;
