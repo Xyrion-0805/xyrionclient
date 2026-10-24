@@ -123,7 +123,7 @@ if ($Action -in @('Package', 'All')) {
     Get-ChildItem -LiteralPath $build -Filter '*.dll' -File | Copy-Item -Destination $package -Force
     Get-ChildItem -LiteralPath "$build\data" | Copy-Item -Destination $packageData -Recurse -Force
     Remove-ObsoleteUiAssets $packageData
-    Copy-Item -LiteralPath "$root\storage.cfg", "$root\license.txt" -Destination $package -Force
+    Copy-Item -LiteralPath "$root\storage.cfg", "$root\license.txt", "$root\LICENSE" -Destination $package -Force
     Copy-Item -LiteralPath "$root\steam_api.dll", "$root\steam_appid.txt" -Destination $package -Force
     Copy-Item -LiteralPath (Join-Path $playbackRoot 'LICENSE.txt') -Destination (Join-Path $package 'LICENSE-FFMPEG.txt') -Force
     Copy-Item -LiteralPath (Join-Path $webviewRoot 'LICENSE.txt') -Destination (Join-Path $package 'LICENSE-WebView2.txt') -Force

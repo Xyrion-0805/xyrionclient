@@ -174,3 +174,24 @@ tags
 !/.env.example
 /settings_ddnet.cfg
 /autoexec.cfg
+/mods/
+
+# Additional C/C++ artifacts from the GitHub repository initialization.
+*.d
+*.slo
+*.lo
+*.o
+*.obj
+*.gch
+*.pch
+*.ilk
+*.so.*
+*.lai
+*.la
+*.lib
+*.out
+*.app
+*.bak
+*.dwo
+Testing/
+vcpkg_installed/
