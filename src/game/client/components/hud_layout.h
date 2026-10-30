@@ -24,7 +24,6 @@ enum EModule
 	MODULE_LOCAL_TIME,
 	MODULE_SPECTATOR_COUNT,
 	MODULE_SCORE,
-	MODULE_MUSIC_PLAYER,
 	MODULE_VOICE_TALKERS,
 	MODULE_VOICE_STATUS,
 	MODULE_CHAT,
@@ -94,8 +93,6 @@ void ResetEditableModules();
 SModuleRect ClampRectToScreen(const SModuleRect &Rect, float HudWidth, float HudHeight);
 float CanvasXToHud(float CanvasX, float HudWidth);
 int BackgroundCorners(int DefaultCorners, float RectX, float RectY, float RectW, float RectH, float CanvasWidth, float CanvasHeight);
-void TryApplyMusicPlayerLegacyPositionFix(float HudWidth, float HudHeight, ITextRender *pTextRender);
-void SetMusicPlayerResolvedDefaultX(float HudX, float HudWidth);
 void OnConsoleInit(IConsole *pConsole, IConfigManager *pConfigManager);
 
 } // namespace HudLayout

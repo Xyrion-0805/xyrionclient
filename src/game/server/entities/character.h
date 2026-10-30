@@ -175,6 +175,11 @@ private:
 	static bool IsSwitchActiveCb(unsigned char Number, void *pUser);
 	void SetTimeCheckpoint(int TimeCheckpoint);
 	void HandleTiles(int Index);
+	int m_LastEnvelopeTriggerZone = -1;
+	int m_AxiomHookQuad = -1;
+	vec2 m_AxiomHookLocalPos = vec2(0, 0);
+	bool m_LastAxiomRefillJumps = false;
+	void HandleAxiomQuads();
 	float m_Time;
 	int m_LastBroadcast;
 	void DDRaceInit();

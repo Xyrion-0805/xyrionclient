@@ -1870,6 +1870,7 @@ void CGameContext::OnClientInfoChange(int ClientId)
 
 void CGameContext::OnClientDrop(int ClientId, const char *pReason)
 {
+	m_World.m_EnvelopeTriggers.ResetClient(ClientId);
 	LogEvent("Disconnect", ClientId);
 
 	AbortVoteKickOnDisconnect(ClientId);
@@ -3905,6 +3906,9 @@ void CGameContext::OnConsoleInit()
 	Console()->Register("toggle_tune", "s[tuning] f[value 1] f[value 2]", CFGFLAG_SERVER, ConToggleTuneParam, this, "Toggle tune variable");
 	Console()->Register("tune_reset", "?s[tuning]", CFGFLAG_SERVER, ConTuneReset, this, "Reset all or one tuning variable to default");
 	Console()->Register("tunes", "", CFGFLAG_SERVER, ConTunes, this, "List all tuning variables and their values");
+	Console()->Register("envelope_trigger", "i[zone] s[trigger_type] i[envelope]", CFGFLAG_GAME, ConEnvelopeTrigger, this, "Set a trigger type for an envelope in a trigger zone");
+	Console()->Register("envelope_trigger_spawn", "s[trigger_type]", CFGFLAG_GAME, ConEnvelopeTriggerSpawn, this, "Set the initial envelope playback mode");
+	Console()->Register("tune_zone_envelope_trigger", "i[zone] i[envelope_zone]", CFGFLAG_GAME, ConTuneZoneEnvelopeTrigger, this, "Make a tune zone activate an envelope zone");
 	Console()->Register("tune_zone", "i[zone] s[tuning] f[value]", CFGFLAG_SERVER | CFGFLAG_GAME, ConTuneZone, this, "Tune in zone a variable to value");
 	Console()->Register("tune_zone_dump", "i[zone]", CFGFLAG_SERVER, ConTuneDumpZone, this, "Dump zone tuning in zone x");
 	Console()->Register("tune_zone_reset", "?i[zone]", CFGFLAG_SERVER, ConTuneResetZone, this, "Reset zone tuning in zone x or in all zones");
@@ -4224,6 +4228,8 @@ void CGameContext::OnInit(const void *pPersistentData)
 	Console()->ExecuteFile(g_Config.m_SvResetFile, IConsole::CLIENT_ID_UNSPECIFIED);
 
 	LoadMapSettings();
+	m_Collision.SetAxiomQuadCollision(true);
+	SetQuadContext(-1);
 
 	m_pConfigManager->SetGameSettingsReadOnly(true);
 
@@ -4615,9 +4621,38 @@ void CGameContext::OnShutdown(void *pPersistentData)
 	Clear();
 }
 
+void CGameContext::SetQuadContext(int ClientId)
+{
+	const int Team = ClientId >= 0 && ClientId < MAX_CLIENTS ? GetDDRaceTeam(ClientId) : TEAM_FLOCK;
+	m_Collision.SetAxiomQuadRoundStartTick(m_World.m_EnvelopeTriggers.MapStartTick());
+	m_Collision.SetEnvelopeTriggerContext(&m_World.m_EnvelopeTriggers, ClientId, Team, Server()->Tick());
+	m_Collision.SetAxiomQuadTick(Server()->Tick(), Server()->TickSpeed());
+}
+
+void CGameContext::ConEnvelopeTrigger(IConsole::IResult *pResult, void *pUserData)
+{
+	auto *pSelf = static_cast<CGameContext *>(pUserData);
+	if(!pSelf->m_World.m_EnvelopeTriggers.AddTrigger(pResult->GetInteger(0), pResult->GetString(1), pResult->GetInteger(2)))
+		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "envelope_trigger", "Invalid trigger zone, type or envelope index (indices start at zero)");
+}
+
+void CGameContext::ConEnvelopeTriggerSpawn(IConsole::IResult *pResult, void *pUserData)
+{
+	auto *pSelf = static_cast<CGameContext *>(pUserData);
+	if(!pSelf->m_World.m_EnvelopeTriggers.SetSpawn(pResult->GetString(0)))
+		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "envelope_trigger_spawn", "Invalid trigger type");
+}
+
+void CGameContext::ConTuneZoneEnvelopeTrigger(IConsole::IResult *pResult, void *pUserData)
+{
+	auto *pSelf = static_cast<CGameContext *>(pUserData);
+	pSelf->m_World.m_EnvelopeTriggers.SetTuneZone(pResult->GetInteger(0), pResult->GetInteger(1));
+}
+
 void CGameContext::LoadMapSettings()
 {
 	IMap *pMap = Map();
+	m_World.m_EnvelopeTriggers.Init(pMap, Server()->Tick());
 	int Start, Num;
 	pMap->GetType(MAPITEMTYPE_INFO, &Start, &Num);
 	for(int i = Start; i < Start + Num; i++)
@@ -4678,6 +4713,45 @@ void CGameContext::OnSnap(int ClientId, bool GlobalSnap, bool RecordingDemo)
 		m_apPlayers[ClientId]->FakeSnap();
 
 	m_World.Snap(ClientId);
+
+	if(m_World.m_EnvelopeTriggers.Enabled() && !Server()->IsSixup(ClientId))
+	{
+		int ViewId = ClientId;
+		if(ClientId >= 0 && m_apPlayers[ClientId] && m_apPlayers[ClientId]->SpectatorId() >= 0)
+			ViewId = m_apPlayers[ClientId]->SpectatorId();
+		if(ViewId < 0)
+		{
+			// Server demos use one explicit perspective, also recorded in the info.
+			for(int i = 0; i < MAX_CLIENTS; ++i)
+				if(m_apPlayers[i] && m_apPlayers[i]->GetCharacter())
+				{
+					ViewId = i;
+					break;
+				}
+		}
+		if(ViewId >= 0 && ViewId < MAX_CLIENTS)
+		{
+			const auto &Triggers = m_World.m_EnvelopeTriggers;
+			const int Team = GetDDRaceTeam(ViewId);
+			CNetObj_EnvelopeTriggerInfo Info;
+			Info.m_MapStartTick = Triggers.MapStartTick();
+			Info.m_SpawnType = Triggers.SpawnType();
+			Info.m_ClientId = ViewId;
+			Info.m_Team = Team;
+			Server()->SnapNewItem(0, Info);
+			for(int Env = 0; Env < Triggers.NumEnvelopes() && Env < 65535; ++Env)
+			{
+				const auto State = Triggers.State(Env, ViewId, Team);
+				CNetObj_EnvelopeTrigger Data;
+				Data.m_StartTick = State.m_StartTick;
+				Data.m_Type = State.m_Type;
+				Data.m_ClientId = ViewId;
+				Data.m_Flags = TRIGGER_FLAG_TEAM;
+				Data.m_OffsetMillis = State.m_OffsetMillis;
+				Server()->SnapNewItem(Env, Data);
+			}
+		}
+	}
 
 	// events are only sent on global snapshots
 	if(GlobalSnap)

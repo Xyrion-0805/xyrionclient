@@ -47,17 +47,19 @@ powershell -ExecutionPolicy Bypass -File scripts/build_xyrion.ps1 -Action Packag
 | 操作 | 内容 |
 | --- | --- |
 | `Configure` | 准备运行依赖并生成 CMake 配置 |
-| `Build` | 增量编译并覆盖客户端，不运行测试 |
-| `Package` | 编译并整理完整运行目录，不运行测试 |
+| `Build` | 增量编译并覆盖客户端与服务端，不运行测试 |
+| `Package` | 编译客户端与服务端并整理完整运行目录，不运行测试 |
 | `Test` | 构建并运行脚本指定的自动测试集合 |
 | `All` | 配置、构建、测试、打包 |
 
 默认操作为 `All`，只需要构建包时请明确写 `-Action Package`。只使用 `build-xyrion`，不创建 next/update 构建目录。若客户端占用输出文件，先关闭对应实例。
 
-- 编译输出：`build-xyrion/XyrionClient.exe`。
+- 编译输出：`build-xyrion/XyrionClient.exe` 与 `build-xyrion/DDNet-Server.exe`。
 - 完整运行目录：`dist/XyrionClient/`。
 - 脚本不会自动生成 ZIP；可对整个运行目录压缩，不能只分发 exe。
 - 不自动覆盖 Steam 安装目录，也不自动发布 GitHub Release。
+
+运行目录内含两套可执行程序、共用 DLL／地图资源和 `autoexec_server.cfg`。启动 `DDNet-Server.exe` 即运行修改版服务端；Envelope Trigger 与 QQuad 联动的地图设置见 [ENVELOPE_QQUAD.md](ENVELOPE_QQUAD.md)。服务端二进制随 Release 压缩包分发，不提交到源码树。
 
 ## 运行依赖
 

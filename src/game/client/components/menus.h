@@ -17,6 +17,7 @@
 
 #include <game/client/component.h>
 #include <game/client/QmUi/SettingsChoice.h>
+#include <game/client/QmUi/SettingsCardDeck.h>
 #include <game/client/QmUi/UiContext.h>
 #include <game/client/QmUi/UiNavigation.h>
 #include <unordered_map>
@@ -43,6 +44,18 @@ class CMenus : public CComponent
     using SSettingsRadioState = SSettingsChoiceState;
     std::unordered_map<const void *, SSettingsRadioState> m_SettingsRadioStates;
     IUiContext SettingsUiContext(const char *pScope, float UiScale);
+    CSettingsCardDeck m_SettingsCardDeck;
+    qm_card_order::CModel m_SettingsCardOrderModel;
+    SSettingsCardDeckDisplayCycleState m_SettingsCardDisplayState;
+    uint64_t m_SettingsCardDisplayCycle = 0;
+    std::string m_SettingsCardOrderSource;
+    bool m_SettingsCardOrderLoaded = false;
+    std::unordered_map<std::string, float> m_SettingsCardContentHeights;
+    void RenderSettingsCardPage(CUIRect MainView, const char *pTab, const std::vector<SSettingsCardDefinition> &Cards);
+    void RenderSettingsLegacyPanel(CUIRect MainView, const char *pId, const char *pTitle, FSettingsCardRender Render);
+    SSettingsCardDefinition SettingsCardDefinition(const char *pId, const char *pTitle, float InitialHeight, FSettingsCardRenderMeasured Render);
+    SCardMotionSpec SettingsCardMotionSpec() const;
+    SSettingsCardDeckVisualOptions SettingsCardDeckVisualOptions() const;
     IUiContext TabBarUiContext() const;
     ui_widget::SCapsuleTabBarStyle SettingsCapsuleTabBarStyle() const;
     ui_widget::SCapsuleTabBarStyle CapsuleTabBarStyleFor(const ColorRGBA &SurfaceColor) const;

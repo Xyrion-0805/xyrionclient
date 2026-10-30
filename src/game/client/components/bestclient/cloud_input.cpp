@@ -7,7 +7,7 @@
 #include <game/client/gameclient.h>
 #include <cmath>
 
-bool CCloudInput::IsActive() const { return g_Config.m_BcInputs == BC_INPUTS_CLOUD && Amount() > 0.0f; }
+bool CCloudInput::IsActive() const { return !g_Config.m_XcPixelMove && !g_Config.m_XcTeeBalanceRunning && g_Config.m_BcInputs == BC_INPUTS_CLOUD && Amount() > 0.0f; }
 float CCloudInput::Amount() const { return g_Config.m_BcCloudInputAmount / 100.0f; }
 int CCloudInput::SelfTickOffset() const { return (int)std::ceil(Amount()); }
 int CCloudInput::OthersTickOffset() const { return g_Config.m_BcCloudInputOthers && Amount() > 0.0f ? 1 : 0; }

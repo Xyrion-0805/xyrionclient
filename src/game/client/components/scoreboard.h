@@ -7,6 +7,7 @@
 #include <engine/graphics.h>
 
 #include <game/client/component.h>
+#include "qmclient/scoreboard_media_controls.h"
 #include <game/client/ui.h>
 #include <game/client/ui_rect.h>
 
@@ -36,6 +37,7 @@ class CScoreboard : public CComponent
 	const char *GetTeamName(int Team) const;
 
 	bool m_Active;
+	CQmScoreboardMediaControls m_MediaControls;
 
 	IGraphics::CTextureHandle m_DeadTeeTexture;
 

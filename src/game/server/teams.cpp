@@ -74,6 +74,7 @@ void CGameTeams::ResetRoundState(int Team)
 
 void CGameTeams::ResetSwitchers(int Team)
 {
+	GameServer()->m_World.m_EnvelopeTriggers.ResetTeam(Team, m_Core);
 	for(auto &Switcher : GameServer()->Switchers())
 	{
 		Switcher.m_aStatus[Team] = Switcher.m_Initial;
@@ -480,6 +481,7 @@ void CGameTeams::SetForceCharacterTeam(int ClientId, int Team)
 		}
 	}
 
+	GameServer()->m_World.m_EnvelopeTriggers.ResetClient(ClientId);
 	m_Core.Team(ClientId, Team);
 	UpdateLegacyTeamMap();
 

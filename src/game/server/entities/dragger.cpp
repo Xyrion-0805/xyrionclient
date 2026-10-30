@@ -77,6 +77,7 @@ void CDragger::LookForPlayersToDrag()
 	for(int i = 0; i < NumPlayersInRange; i++)
 	{
 		CCharacter *pTarget = static_cast<CCharacter *>(apPlayersInRange[i]);
+		GameServer()->SetQuadContext(pTarget->GetPlayer()->GetCid());
 		const int &TargetTeam = pTarget->Team();
 
 		// Do not create a dragger beam for super player

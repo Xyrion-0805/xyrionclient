@@ -6,6 +6,7 @@
 #include "save.h"
 
 #include <game/gamecore.h>
+#include <game/envelope_trigger.h>
 
 #include <vector>
 
@@ -21,6 +22,7 @@ class CCharacter;
 class CGameWorld
 {
 public:
+	CEnvelopeTriggerRuntime m_EnvelopeTriggers;
 	enum
 	{
 		ENTTYPE_PROJECTILE = 0,

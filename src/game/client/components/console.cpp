@@ -1836,6 +1836,7 @@ void CGameConsole::Prompt(char (&aPrompt)[32])
 
 void CGameConsole::OnRender()
 {
+	if(GameClient()->m_DemoTimeline.IsRendering()) return;
 	// 导出准备每帧推进一步，完成后任务才交给后台线程。
 	m_LocalConsole.UpdateChatExport();
 	CUIRect Screen = *Ui()->Screen();

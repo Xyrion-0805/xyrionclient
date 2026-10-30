@@ -16,45 +16,35 @@
 
 void CMenus::RenderSettingsGeneral(CUIRect MainView)
 {
-	char aBuf[128 + IO_MAX_PATH_LENGTH];
-	CUIRect Label, Button, Left, Right, Game, ClientSettings;
-	MainView.HSplitTop(150.0f, &Game, &ClientSettings);
-
-	// game
-	{
-		// headline
-		Game.HSplitTop(30.0f, &Label, &Game);
-		Ui()->DoLabel(&Label, Localize("Game"), 20.0f, TEXTALIGN_ML);
-		Game.HSplitTop(5.0f, nullptr, &Game);
-		Game.VSplitMid(&Left, nullptr, 20.0f);
-
-		// dynamic camera
-		Left.HSplitTop(20.0f, &Button, &Left);
+	const auto Metrics = ResolveSettingsContentMetrics(MainView.w);
+	const auto Row = [&](CUIRect &Content) {
+		CUIRect Button;
+		Content.HSplitTop(Metrics.m_LineHeight, &Button, &Content);
+		Content.HSplitTop(Metrics.m_LineSpacing, nullptr, &Content);
+		return Button;
+	};
+	const auto Toggle = [&](CUIRect &Content, int &Value, const char *pText) {
+		const CUIRect Button = Row(Content);
+		if(DoButton_CheckBox(&Value, pText, Value, &Button, Metrics.m_BodySize))
+			Value ^= 1;
+	};
+	std::vector<SSettingsCardDefinition> Cards;
+	Cards.push_back(SettingsCardDefinition("deck:general-game", Localize("Game"), 4.0f * Metrics.m_RowStep, [&](CUIRect &Content) {
+		CUIRect Button = Row(Content);
 		const bool IsDyncam = g_Config.m_ClDyncam || g_Config.m_ClMouseFollowfactor > 0;
-		if(DoButton_CheckBox(&g_Config.m_ClDyncam, Localize("Dynamic Camera"), IsDyncam, &Button))
+		if(DoButton_CheckBox(&g_Config.m_ClDyncam, Localize("Dynamic Camera"), IsDyncam, &Button, Metrics.m_BodySize))
 		{
+			g_Config.m_ClDyncam = IsDyncam ? 0 : 1;
 			if(IsDyncam)
-			{
-				g_Config.m_ClDyncam = 0;
 				g_Config.m_ClMouseFollowfactor = 0;
-			}
-			else
-			{
-				g_Config.m_ClDyncam = 1;
-			}
 		}
-
-		// smooth dynamic camera
-		Left.HSplitTop(5.0f, nullptr, &Left);
-		Left.HSplitTop(20.0f, &Button, &Left);
-		if(g_Config.m_ClDyncam)
+		if(g_Config.m_ClDyncam || g_Config.m_ClMouseFollowfactor > 0)
 		{
-			if(DoButton_CheckBox(&g_Config.m_ClDyncamSmoothness, Localize("Smooth Dynamic Camera"), g_Config.m_ClDyncamSmoothness, &Button))
+			Button = Row(Content);
+			if(DoButton_CheckBox(&g_Config.m_ClDyncamSmoothness, Localize("Smooth Dynamic Camera"), g_Config.m_ClDyncamSmoothness, &Button, Metrics.m_BodySize))
 			{
 				if(g_Config.m_ClDyncamSmoothness)
-				{
 					g_Config.m_ClDyncamSmoothness = 0;
-				}
 				else
 				{
 					g_Config.m_ClDyncamSmoothness = 50;
@@ -62,141 +52,60 @@ void CMenus::RenderSettingsGeneral(CUIRect MainView)
 				}
 			}
 		}
-
-		// weapon pickup
-		Left.HSplitTop(5.0f, nullptr, &Left);
-		Left.HSplitTop(20.0f, &Button, &Left);
-		if(DoButton_CheckBox(&g_Config.m_ClAutoswitchWeapons, Localize("Switch weapon on pickup"), g_Config.m_ClAutoswitchWeapons, &Button))
-			g_Config.m_ClAutoswitchWeapons ^= 1;
-
-		// weapon out of ammo autoswitch
-		Left.HSplitTop(5.0f, nullptr, &Left);
-		Left.HSplitTop(20.0f, &Button, &Left);
-		if(DoButton_CheckBox(&g_Config.m_ClAutoswitchWeaponsOutOfAmmo, Localize("Switch weapon when out of ammo"), g_Config.m_ClAutoswitchWeaponsOutOfAmmo, &Button))
-			g_Config.m_ClAutoswitchWeaponsOutOfAmmo ^= 1;
-	}
-
-	// client
-	{
-		// headline
-		ClientSettings.HSplitTop(30.0f, &Label, &ClientSettings);
-		Ui()->DoLabel(&Label, Localize("Client"), 20.0f, TEXTALIGN_ML);
-		ClientSettings.HSplitTop(5.0f, nullptr, &ClientSettings);
-		ClientSettings.VSplitMid(&Left, &Right, 20.0f);
-
-		// skip main menu
-		Left.HSplitTop(20.0f, &Button, &Left);
-		if(DoButton_CheckBox(&g_Config.m_ClSkipStartMenu, Localize("Skip the main menu"), g_Config.m_ClSkipStartMenu, &Button))
-			g_Config.m_ClSkipStartMenu ^= 1;
-
-		Left.HSplitTop(10.0f, nullptr, &Left);
-		Left.HSplitTop(20.0f, &Button, &Left);
-		str_copy(aBuf, " ");
-		str_append(aBuf, Localize("Hz", "Hertz"));
-		Ui()->DoScrollbarOption(&g_Config.m_ClRefreshRate, &g_Config.m_ClRefreshRate, &Button, Localize("Update Rate"), 10, 1000, &CUi::ms_LinearScrollbarScale, CUi::SCROLLBAR_OPTION_INFINITE | CUi::SCROLLBAR_OPTION_NOCLAMPVALUE | CUi::SCROLLBAR_OPTION_DELAYUPDATE, aBuf);
-		Left.HSplitTop(5.0f, nullptr, &Left);
-		Left.HSplitTop(20.0f, &Button, &Left);
+		Toggle(Content, g_Config.m_ClAutoswitchWeapons, Localize("Switch weapon on pickup"));
+		Toggle(Content, g_Config.m_ClAutoswitchWeaponsOutOfAmmo, Localize("Switch weapon when out of ammo"));
+	}));
+	const float LanguageHeight = ResolveSettingsGeneralLanguageListGeometry((int)g_Localization.Languages().size(), Metrics).m_ContentHeight;
+	Cards.push_back(SettingsCardDefinition("deck:general-language", Localize("Language"), LanguageHeight, [&](CUIRect &Content) {
+		CUIRect List;
+		Content.HSplitTop(LanguageHeight, &List, &Content);
+		RenderLanguageSelection(List);
+	}));
+	const float ThemeHeight = ResolveSettingsGeneralThemeListGeometry((int)GameClient()->m_MenuBackground.GetThemes().size(), Metrics).m_ContentHeight;
+	Cards.push_back(SettingsCardDefinition("deck:general-client", Localize("Client"), 8.0f * Metrics.m_RowStep + ThemeHeight, [&](CUIRect &Content) {
+		Toggle(Content, g_Config.m_ClSkipStartMenu, Localize("Skip the main menu"));
+		CUIRect Button = Row(Content);
+		char aHz[32];
+		str_format(aHz, sizeof(aHz), " %s", Localize("Hz", "Hertz"));
+		Ui()->DoScrollbarOption(&g_Config.m_ClRefreshRate, &g_Config.m_ClRefreshRate, &Button, Localize("Update Rate"), 10, 1000, &CUi::ms_LinearScrollbarScale, CUi::SCROLLBAR_OPTION_INFINITE | CUi::SCROLLBAR_OPTION_NOCLAMPVALUE | CUi::SCROLLBAR_OPTION_DELAYUPDATE, aHz);
+		Button = Row(Content);
 		static int s_LowerRefreshRate;
-		if(DoButton_CheckBox(&s_LowerRefreshRate, Localize("Save power by lowering update rate (higher input latency)"), g_Config.m_ClRefreshRate <= 480 && g_Config.m_ClRefreshRate != 0, &Button))
+		if(DoButton_CheckBox(&s_LowerRefreshRate, Localize("Save power by lowering update rate (higher input latency)"), g_Config.m_ClRefreshRate <= 480 && g_Config.m_ClRefreshRate != 0, &Button, Metrics.m_BodySize))
 			g_Config.m_ClRefreshRate = g_Config.m_ClRefreshRate > 480 || g_Config.m_ClRefreshRate == 0 ? 480 : 0;
-
-		CUIRect SettingsButton;
-		Left.HSplitBottom(20.0f, &Left, &SettingsButton);
-		Left.HSplitBottom(5.0f, &Left, nullptr);
-		static CButtonContainer s_SettingsButtonId;
-		if(DoButton_Menu(&s_SettingsButtonId, Localize("Settings file"), 0, &SettingsButton))
+		const char *apNames[] = {Localize("Settings file"), Localize("Saves file"), Localize("Config directory"), Localize("Themes directory")};
+		const char *apPaths[] = {s_aConfigDomains[ConfigDomain::DDNET].m_aConfigPath, SAVES_FILE, "", "themes"};
+		static CButtonContainer s_aPaths[4];
+		for(int i = 0; i < 4; ++i)
 		{
-			Storage()->GetCompletePath(IStorage::TYPE_SAVE, s_aConfigDomains[ConfigDomain::DDNET].m_aConfigPath, aBuf, sizeof(aBuf));
-			Client()->ViewFile(aBuf);
-		}
-		GameClient()->m_Tooltips.DoToolTip(&s_SettingsButtonId, &SettingsButton, Localize("Open the settings file"));
-
-		CUIRect SavesButton;
-		Left.HSplitBottom(20.0f, &Left, &SavesButton);
-		Left.HSplitBottom(5.0f, &Left, nullptr);
-		static CButtonContainer s_SavesButtonId;
-		if(DoButton_Menu(&s_SavesButtonId, Localize("Saves file"), 0, &SavesButton))
-		{
-			Storage()->GetCompletePath(IStorage::TYPE_SAVE, SAVES_FILE, aBuf, sizeof(aBuf));
-			Client()->ViewFile(aBuf);
-		}
-		GameClient()->m_Tooltips.DoToolTip(&s_SavesButtonId, &SavesButton, Localize("Open the saves file"));
-
-		CUIRect ConfigButton;
-		Left.HSplitBottom(20.0f, &Left, &ConfigButton);
-		Left.HSplitBottom(5.0f, &Left, nullptr);
-		static CButtonContainer s_ConfigButtonId;
-		if(DoButton_Menu(&s_ConfigButtonId, Localize("Config directory"), 0, &ConfigButton))
-		{
-			Storage()->GetCompletePath(IStorage::TYPE_SAVE, "", aBuf, sizeof(aBuf));
-			Client()->ViewFile(aBuf);
-		}
-		GameClient()->m_Tooltips.DoToolTip(&s_ConfigButtonId, &ConfigButton, Localize("Open the directory that contains the configuration and user files"));
-
-		CUIRect DirectoryButton;
-		Left.HSplitBottom(20.0f, &Left, &DirectoryButton);
-		Left.HSplitBottom(5.0f, &Left, nullptr);
-		static CButtonContainer s_ThemesButtonId;
-		if(DoButton_Menu(&s_ThemesButtonId, Localize("Themes directory"), 0, &DirectoryButton))
-		{
-			Storage()->GetCompletePath(IStorage::TYPE_SAVE, "themes", aBuf, sizeof(aBuf));
-			Storage()->CreateFolder("themes", IStorage::TYPE_SAVE);
-			Client()->ViewFile(aBuf);
-		}
-		GameClient()->m_Tooltips.DoToolTip(&s_ThemesButtonId, &DirectoryButton, Localize("Open the directory to add custom themes"));
-
-		Left.HSplitTop(20.0f, nullptr, &Left);
-		RenderThemeSelection(Left);
-
-		// auto demo settings
-		{
-			Right.HSplitTop(40.0f, nullptr, &Right);
-			Right.HSplitTop(20.0f, &Button, &Right);
-			if(DoButton_CheckBox(&g_Config.m_ClAutoDemoRecord, Localize("Automatically record demos"), g_Config.m_ClAutoDemoRecord, &Button))
-				g_Config.m_ClAutoDemoRecord ^= 1;
-
-			Right.HSplitTop(2 * 20.0f, &Button, &Right);
-			if(g_Config.m_ClAutoDemoRecord)
-				Ui()->DoScrollbarOption(&g_Config.m_ClAutoDemoMax, &g_Config.m_ClAutoDemoMax, &Button, Localize("Max demos"), 1, 1000, &CUi::ms_LinearScrollbarScale, CUi::SCROLLBAR_OPTION_INFINITE | CUi::SCROLLBAR_OPTION_MULTILINE);
-
-			Right.HSplitTop(10.0f, nullptr, &Right);
-			Right.HSplitTop(20.0f, &Button, &Right);
-			if(DoButton_CheckBox(&g_Config.m_ClAutoScreenshot, Localize("Automatically take game over screenshot"), g_Config.m_ClAutoScreenshot, &Button))
-				g_Config.m_ClAutoScreenshot ^= 1;
-
-			Right.HSplitTop(2 * 20.0f, &Button, &Right);
-			if(g_Config.m_ClAutoScreenshot)
-				Ui()->DoScrollbarOption(&g_Config.m_ClAutoScreenshotMax, &g_Config.m_ClAutoScreenshotMax, &Button, Localize("Max Screenshots"), 1, 1000, &CUi::ms_LinearScrollbarScale, CUi::SCROLLBAR_OPTION_INFINITE | CUi::SCROLLBAR_OPTION_MULTILINE);
-		}
-
-		// auto statboard screenshot
-		{
-			Right.HSplitTop(10.0f, nullptr, &Right);
-			Right.HSplitTop(20.0f, &Button, &Right);
-			if(DoButton_CheckBox(&g_Config.m_ClAutoStatboardScreenshot, Localize("Automatically take statboard screenshot"), g_Config.m_ClAutoStatboardScreenshot, &Button))
+			Button = Row(Content);
+			if(DoButton_Menu(&s_aPaths[i], apNames[i], 0, &Button))
 			{
-				g_Config.m_ClAutoStatboardScreenshot ^= 1;
+				char aPath[IO_MAX_PATH_LENGTH];
+				if(i == 3)
+					Storage()->CreateFolder("themes", IStorage::TYPE_SAVE);
+				Storage()->GetCompletePath(IStorage::TYPE_SAVE, apPaths[i], aPath, sizeof(aPath));
+				Client()->ViewFile(aPath);
 			}
-
-			Right.HSplitTop(2 * 20.0f, &Button, &Right);
-			if(g_Config.m_ClAutoStatboardScreenshot)
-				Ui()->DoScrollbarOption(&g_Config.m_ClAutoStatboardScreenshotMax, &g_Config.m_ClAutoStatboardScreenshotMax, &Button, Localize("Max Screenshots"), 1, 1000, &CUi::ms_LinearScrollbarScale, CUi::SCROLLBAR_OPTION_INFINITE | CUi::SCROLLBAR_OPTION_MULTILINE);
 		}
-
-		// auto statboard csv
-		{
-			Right.HSplitTop(10.0f, nullptr, &Right);
-			Right.HSplitTop(20.0f, &Button, &Right);
-			if(DoButton_CheckBox(&g_Config.m_ClAutoCSV, Localize("Automatically create statboard csv"), g_Config.m_ClAutoCSV, &Button))
+		CUIRect Themes;
+		Content.HSplitTop(ThemeHeight, &Themes, &Content);
+		RenderThemeSelection(Themes);
+	}));
+	Cards.push_back(SettingsCardDefinition("deck:general-recording", Localize("Demo"), 8.0f * Metrics.m_RowStep, [&](CUIRect &Content) {
+		const auto Record = [&](int &Enabled, int &Max, const char *pLabel, const char *pLimit) {
+			Toggle(Content, Enabled, pLabel);
+			if(Enabled)
 			{
-				g_Config.m_ClAutoCSV ^= 1;
+				const CUIRect Button = Row(Content);
+				Ui()->DoScrollbarOption(&Max, &Max, &Button, pLimit, 1, 1000, &CUi::ms_LinearScrollbarScale, CUi::SCROLLBAR_OPTION_INFINITE);
 			}
-
-			Right.HSplitTop(2 * 20.0f, &Button, &Right);
-			if(g_Config.m_ClAutoCSV)
-				Ui()->DoScrollbarOption(&g_Config.m_ClAutoCSVMax, &g_Config.m_ClAutoCSVMax, &Button, Localize("Max CSVs"), 1, 1000, &CUi::ms_LinearScrollbarScale, CUi::SCROLLBAR_OPTION_INFINITE | CUi::SCROLLBAR_OPTION_MULTILINE);
-		}
-	}
+		};
+		Record(g_Config.m_ClAutoDemoRecord, g_Config.m_ClAutoDemoMax, Localize("Automatically record demos"), Localize("Max demos"));
+		Record(g_Config.m_ClAutoScreenshot, g_Config.m_ClAutoScreenshotMax, Localize("Automatically take game over screenshot"), Localize("Max Screenshots"));
+		Record(g_Config.m_ClAutoStatboardScreenshot, g_Config.m_ClAutoStatboardScreenshotMax, Localize("Automatically take statboard screenshot"), Localize("Max Screenshots"));
+		Record(g_Config.m_ClAutoCSV, g_Config.m_ClAutoCSVMax, Localize("Automatically create statboard csv"), Localize("Max CSVs"));
+	}));
+	RenderSettingsCardPage(MainView, "general", Cards);
 }
 
 void CMenus::RenderThemeSelection(CUIRect MainView)

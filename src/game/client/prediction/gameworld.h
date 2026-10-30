@@ -4,6 +4,7 @@
 #define GAME_CLIENT_PREDICTION_GAMEWORLD_H
 
 #include <game/gamecore.h>
+#include <game/envelope_trigger.h>
 #include <game/teamscore.h>
 
 #include <list>
@@ -17,6 +18,7 @@ class CMapBugs;
 class CGameWorld
 {
 public:
+	CEnvelopeTriggerRuntime m_EnvelopeTriggers;
 	enum
 	{
 		ENTTYPE_PROJECTILE = 0,

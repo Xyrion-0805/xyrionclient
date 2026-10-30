@@ -90,6 +90,11 @@ bool CCharacter::Spawn(CPlayer *pPlayer, vec2 Pos)
 	m_WeaponChangeTick = Server()->Tick();
 	Antibot()->OnSpawn(m_pPlayer->GetCid());
 
+	GameServer()->m_World.m_EnvelopeTriggers.ResetClient(m_pPlayer->GetCid());
+	m_LastEnvelopeTriggerZone = -1;
+	m_AxiomHookQuad = -1;
+	m_LastAxiomRefillJumps = false;
+	GameServer()->SetQuadContext(m_pPlayer->GetCid());
 	m_Core.Reset();
 	m_Core.Init(&GameServer()->m_World.m_Core, Collision());
 	m_Core.m_ActiveWeapon = WEAPON_GUN;
@@ -789,6 +794,7 @@ void CCharacter::ResetInput()
 
 void CCharacter::PreTick()
 {
+	GameServer()->SetQuadContext(GetPlayer()->GetCid());
 	if(m_StartTime > Server()->Tick())
 	{
 		// Prevent the player from getting a negative time
@@ -809,14 +815,31 @@ void CCharacter::PreTick()
 
 	DDRaceTick();
 
+	if(m_Core.m_HookState != HOOK_GRABBED || m_Core.HookedPlayer() != -1)
+		m_AxiomHookQuad = -1;
+	else if(m_AxiomHookQuad >= 0)
+	{
+		if(!Collision()->GetAxiomHookAnchor(m_AxiomHookQuad, m_AxiomHookLocalPos, &m_Core.m_HookPos))
+		{
+			m_AxiomHookQuad = -1;
+			m_Core.m_HookState = HOOK_RETRACTED;
+			m_Core.m_HookPos = m_Core.m_Pos;
+		}
+	}
+	else
+		Collision()->FindAxiomHookAnchor(m_Core.m_HookPos, &m_AxiomHookQuad, &m_AxiomHookLocalPos);
+
 	Antibot()->OnCharacterTick(m_pPlayer->GetCid());
 
 	m_Core.m_Input = m_Input;
 	m_Core.Tick(true, !g_Config.m_SvNoWeakHook);
+	if(m_AxiomHookQuad < 0 && m_Core.m_HookState == HOOK_GRABBED && m_Core.HookedPlayer() == -1)
+		Collision()->FindAxiomHookAnchor(m_Core.m_HookPos, &m_AxiomHookQuad, &m_AxiomHookLocalPos);
 }
 
 void CCharacter::Tick()
 {
+	GameServer()->SetQuadContext(GetPlayer()->GetCid());
 	if(g_Config.m_SvNoWeakHook)
 	{
 		if(m_Paused)
@@ -836,6 +859,9 @@ void CCharacter::Tick()
 
 	// handle Weapons
 	HandleWeapons();
+	HandleAxiomQuads();
+	if(!m_Alive)
+		return;
 
 	DDRacePostCoreTick();
 
@@ -856,6 +882,7 @@ void CCharacter::Tick()
 
 void CCharacter::TickDeferred()
 {
+	GameServer()->SetQuadContext(GetPlayer()->GetCid());
 	// advance the dummy
 	{
 		CWorldCore TempWorld;
@@ -1636,6 +1663,7 @@ void CCharacter::SetTimeCheckpoint(int TimeCheckpoint)
 
 void CCharacter::HandleTiles(int Index)
 {
+	GameWorld()->m_EnvelopeTriggers.HandleTile(*Collision(), Index, GetPlayer()->GetCid(), Team(), Teams()->m_Core, m_LastEnvelopeTriggerZone, Server()->Tick());
 	int MapIndex = Index;
 	m_TileIndex = Collision()->GetTileIndex(MapIndex);
 	m_TileFIndex = Collision()->GetFrontTileIndex(MapIndex);
@@ -2123,11 +2151,77 @@ void CCharacter::HandleTiles(int Index)
 	}
 }
 
+void CCharacter::HandleAxiomQuads()
+{
+	bool Refill = false;
+	for(int Tile : Collision()->GetAxiomQuadTiles(m_Pos))
+	{
+		if(Tile == TILE_FREEZE && !m_Core.m_Super && !m_Core.m_Invincible && !m_Core.m_DeepFrozen)
+			Freeze();
+		else if(Tile == TILE_UNFREEZE && !m_Core.m_DeepFrozen)
+			Unfreeze();
+		else if(Tile == TILE_LFREEZE && !m_Core.m_Super && !m_Core.m_Invincible)
+			m_Core.m_LiveFrozen = true;
+		else if(Tile == TILE_LUNFREEZE)
+			m_Core.m_LiveFrozen = false;
+		else if(Tile == TILE_DFREEZE && !m_Core.m_Super && !m_Core.m_Invincible)
+			m_Core.m_DeepFrozen = true;
+		else if(Tile == TILE_DUNFREEZE)
+			m_Core.m_DeepFrozen = false;
+		else if(Tile == TILE_REFILL_JUMPS)
+		{
+			Refill = true;
+			if(!m_LastAxiomRefillJumps)
+				m_Core.m_JumpedTotal = m_Core.m_Jumped = 0;
+		}
+		else if(Tile == TILE_DEATH && !m_Core.m_Super && !m_Core.m_Invincible)
+		{
+			if(Teams()->IsPractice(Team()))
+				Freeze();
+			else
+			{
+				Die(m_pPlayer->GetCid(), WEAPON_WORLD);
+				return;
+			}
+		}
+		else if(Tile == TILE_FINISH && !m_Core.m_Super && !m_Core.m_Invincible && m_DDRaceState == ERaceState::STARTED)
+			Teams()->OnCharacterFinish(m_pPlayer->GetCid());
+		else if(Tile == TILE_TELECHECKINEVIL && !m_Core.m_Super && !m_Core.m_Invincible)
+		{
+			bool Found = false;
+			for(int Checkpoint = m_TeleCheckpoint - 1; Checkpoint >= 0; --Checkpoint)
+			{
+				const auto &vOuts = Collision()->TeleCheckOuts(Checkpoint);
+				if(vOuts.empty())
+					continue;
+				m_Core.m_Pos = vOuts[GameWorld()->m_Core.RandomOr0(vOuts.size())];
+				Found = true;
+				break;
+			}
+			if(!Found)
+				Found = GameServer()->m_pController->CanSpawn(m_pPlayer->GetTeam(), &m_Core.m_Pos, Team());
+			if(Found)
+			{
+				m_Core.m_Vel = vec2(0, 0);
+				if(!g_Config.m_SvTeleportHoldHook)
+				{
+					ResetHook();
+					GameWorld()->ReleaseHooked(m_pPlayer->GetCid());
+				}
+			}
+		}
+	}
+	m_LastAxiomRefillJumps = Refill;
+}
+
 void CCharacter::HandleTuneLayer()
 {
 	m_TuneZoneOld = m_TuneZone;
 	int CurrentIndex = Collision()->GetMapIndex(m_Pos);
 	m_TuneZone = Collision()->IsTune(CurrentIndex);
+	const int QuadZone = Collision()->GetAxiomQuadTuneZone(m_Pos);
+	if(m_TuneZone == 0 && Collision()->HasAxiomQuadTile(m_Pos, TILE_TUNE))
+		m_TuneZone = QuadZone;
 	m_Core.m_Tuning = TuningList()[m_TuneZone]; // throw tunings from specific zone into gamecore
 
 	if(m_TuneZone != m_TuneZoneOld) // don't send tunigs all the time

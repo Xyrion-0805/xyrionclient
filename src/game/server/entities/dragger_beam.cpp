@@ -32,6 +32,7 @@ CDraggerBeam::CDraggerBeam(CGameWorld *pGameWorld, CDragger *pDragger, vec2 Pos,
 
 void CDraggerBeam::Tick()
 {
+	GameServer()->SetQuadContext(m_ForClientId);
 	if(!m_Active)
 	{
 		return;

@@ -4,6 +4,7 @@
 #include "client.h"
 
 #include "demoedit.h"
+#include "demo_project_export.h"
 #include "friends.h"
 #include "serverbrowser.h"
 
@@ -4595,6 +4596,14 @@ void CClient::DemoSlice(const char *pDstPath, CLIENTFUNC_FILTER pfnFilter, void 
 	{
 		m_DemoEditor.Slice(m_DemoPlayer.Filename(), pDstPath, g_Config.m_ClDemoSliceBegin, g_Config.m_ClDemoSliceEnd, pfnFilter, pUser);
 	}
+}
+
+std::shared_ptr<CDemoProjectExport> CClient::ExportDemoClips(const std::vector<demo_edit::SClip> &Clips, const char *pFolder, bool RemoveChat)
+{
+	if(!m_DemoPlayer.IsPlaying() || Clips.empty()) return nullptr;
+	auto Job = std::make_shared<CDemoProjectExport>(m_SnapshotDelta, m_SnapshotDeltaSixup, Storage(), m_DemoPlayer.SourceFilename(), pFolder, Clips, RemoveChat);
+	m_pEngine->AddJob(Job);
+	return Job;
 }
 
 const char *CClient::DemoPlayer_Play(const char *pFilename, int StorageType)

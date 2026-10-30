@@ -19,6 +19,7 @@ class CSwitchTile;
 class CTuneTile;
 class CDoorTile;
 class CAxiomQuadCollision;
+class CEnvelopeTriggerRuntime;
 
 enum
 {
@@ -56,13 +57,13 @@ public:
 	bool TestBox(vec2 Pos, vec2 Size) const;
 	bool IsOnGround(vec2 Pos, float Size) const;
 
-	// Opt-in per instance. Only CGameClient enables this; server collisions
-	// retain the original tile physics even when client config is enabled.
+	// Shared server/prediction quad geometry with an explicit team clock.
 	void SetAxiomQuadCollision(bool Enabled);
 	bool AxiomQuadCollisionEnabled() const { return m_pAxiomQuads != nullptr; }
 	void SetAxiomQuadRoundStartTick(int Tick) { m_AxiomRoundStartTick = Tick; }
 	void SetAxiomQuadTick(int Tick, int TickSpeed);
 	void SetAxiomQuadTime(double Seconds);
+	void SetEnvelopeTriggerContext(const CEnvelopeTriggerRuntime *pTriggers, int ClientId, int Team, double Tick);
 	double AxiomQuadTime() const { return m_AxiomQuadTime; }
 	int GetAxiomQuadTile(vec2 Pos) const;
 	bool HasAxiomQuadTile(vec2 Pos, int Tile) const;
@@ -169,6 +170,9 @@ private:
 	std::unique_ptr<CAxiomQuadCollision> m_pAxiomQuads;
 	int m_AxiomRoundStartTick = 0;
 	double m_AxiomQuadTime = 0;
+	const CEnvelopeTriggerRuntime *m_pEnvelopeTriggers = nullptr;
+	int m_EnvelopeClientId = -1, m_EnvelopeTeam = 0;
+	double m_EnvelopeTick = 0;
 
 	CLayers *m_pLayers;
 

@@ -10,9 +10,9 @@ public:
 	{
 	public:
 		bool m_Active;
-		int m_SelectedQuadIndex;
-		int m_Count;
-		vec2 m_aPoints[4];
+		bool m_Dragging;
+		int m_GroupIndex, m_LayerIndex, m_QuadIndex;
+		vec2 m_Start;
 
 		void Reset();
 	};
@@ -21,6 +21,7 @@ public:
 	void Activate(int SelectedQuad);
 	void Deactivate();
 	void DoSlice();
+	void OnUpdate() override;
 };
 
 #endif

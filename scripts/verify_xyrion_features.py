@@ -90,7 +90,7 @@ def main():
         "cl_auto_demo_record 0\ncl_auto_race_record 0\ncl_menu_map \"\"\n"
         "snd_enable 0\ngfx_fullscreen 0\ngfx_screen_width 1280\ngfx_screen_height 800\n"
         "gfx_vsync 1\ncl_refresh_rate 120\ncl_refresh_rate_inactive 120\n"
-        "gfx_gl_major 3\ngfx_gl_minor 0\nbc_music_player 1\n"
+        "gfx_gl_major 3\ngfx_gl_minor 0\nqm_hud_island_enable 1\n"
         "bc_finish_prediction 1\nbc_chat_bubbles 1\nbc_animations 1\n"
         "player_name XyrionSmoke\nxc_video_enabled 1\nxc_video_dim 30\n"
         f"xc_video_path {quote(args.video.resolve())}\ncl_input_fifo {pipe}\n", encoding="utf-8")

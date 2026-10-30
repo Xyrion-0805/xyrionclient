@@ -17,6 +17,8 @@
 
 #include <functional>
 #include <optional>
+#include <memory>
+#include <vector>
 
 #define CONNECTLINK_DOUBLE_SLASH "ddnet://"
 #define CONNECTLINK_NO_SLASH "ddnet:"
@@ -24,6 +26,8 @@
 class CSnapshot;
 class CSnapshotBuffer;
 class IMap;
+class CDemoProjectExport;
+namespace demo_edit { struct SClip; }
 struct SWarning;
 
 enum
@@ -348,6 +352,7 @@ public:
 	virtual void DemoSliceBegin() = 0;
 	virtual void DemoSliceEnd() = 0;
 	virtual void DemoSlice(const char *pDstPath, CLIENTFUNC_FILTER pfnFilter, void *pUser) = 0;
+	virtual std::shared_ptr<CDemoProjectExport> ExportDemoClips(const std::vector<demo_edit::SClip> &Clips, const char *pFolder, bool RemoveChat) = 0;
 
 	enum class EInfoState
 	{

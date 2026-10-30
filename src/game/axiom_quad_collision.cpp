@@ -4,6 +4,7 @@
 #include <base/str.h>
 #include <engine/map.h>
 #include <game/gamecore.h>
+#include <game/envelope_trigger.h>
 #include <game/layers.h>
 #include <game/mapitems_ex.h>
 
@@ -50,9 +51,9 @@ int LayerTile(const char *pName)
 		{"QFr", TILE_FREEZE}, {"QUnFr", TILE_UNFREEZE},
 		{"QDeep", TILE_DFREEZE}, {"QUnDeep", TILE_DUNFREEZE},
 		{"QLiveFr", TILE_LFREEZE}, {"QUnLiveFr", TILE_LUNFREEZE},
-		{"QKill", TILE_DEATH}, {"QFinish", TILE_FINISH},
+		{"QKill", TILE_DEATH}, {"QDeath", TILE_DEATH}, {"QFinish", TILE_FINISH},
 		{"QCfrm", TILE_TELECHECKINEVIL}, {"QHook", TILE_SOLID},
-		{"QStopa", TILE_NOHOOK}, {"QTune", TILE_TUNE},
+		{"QStopa", TILE_NOHOOK}, {"QUnHook", TILE_NOHOOK}, {"QTune", TILE_TUNE},
 		{"QReJump", TILE_REFILL_JUMPS}};
 	for(const auto &Rule : s_aRules)
 		if(str_comp_nocase(pName, Rule.m_pName) == 0)
@@ -317,16 +318,33 @@ void CAxiomQuadCollision::Init(CLayers *pLayers)
 	m_Time = 0;
 }
 
-void CAxiomQuadCollision::SetTime(double Seconds)
+void CAxiomQuadCollision::SetTime(double Seconds, const CEnvelopeTriggerRuntime *pTriggers, int ClientId, int Team, double Tick)
 {
-	if(!std::isfinite(Seconds) || Seconds == m_Time)
+	// Trigger contexts can change without advancing time (multiple teams,
+	// prediction copies, or a trigger reached during this tick).
+	if(!std::isfinite(Seconds) || (Seconds == m_Time && !pTriggers && !m_pTriggers))
 		return;
 	m_Time = Seconds;
+	m_pTriggers = pTriggers;
+	m_ClientId = ClientId;
+	m_Team = Team;
+	m_TriggerTick = Tick;
+	bool Changed = false;
 	for(auto &Sample : m_vEnvelopeSamples)
 	{
 		if(Sample.m_Animated)
-			EvalEnvelope(Sample.m_Envelope, Seconds + Sample.m_Offset / 1000.0, Sample.m_aValues.data(), Sample.m_Channels);
+		{
+			const double Time = pTriggers && pTriggers->Enabled() ? pTriggers->Time(Sample.m_Envelope, Tick, Sample.m_Offset / 1000.0, ClientId, Team) : Seconds + Sample.m_Offset / 1000.0;
+			if(Time == Sample.m_LastTime)
+				continue;
+			Sample.m_LastTime = Time;
+			const auto Previous = Sample.m_aValues;
+			EvalEnvelope(Sample.m_Envelope, Time, Sample.m_aValues.data(), Sample.m_Channels);
+			Changed |= Previous != Sample.m_aValues;
+		}
 	}
+	if(!Changed)
+		return;
 	for(int Index : m_vAnimatedQuads)
 		UpdateQuad(Index);
 }

@@ -403,7 +403,8 @@ int CDemoRecorder::Stop(IDemoRecorder::EStopMode Mode, const char *pTargetFilena
 		}
 	}
 
-	io_close(m_File);
+	const bool WriteFailed = io_error(m_File) != 0;
+	const bool CloseFailed = io_close(m_File) != 0;
 	m_File = nullptr;
 
 	if(Mode == IDemoRecorder::EStopMode::REMOVE_FILE)
@@ -440,7 +441,7 @@ int CDemoRecorder::Stop(IDemoRecorder::EStopMode Mode, const char *pTargetFilena
 		m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "demo_recorder", aBuf, gs_DemoPrintColor);
 	}
 
-	return 0;
+	return WriteFailed || CloseFailed ? -1 : 0;
 }
 
 void CDemoRecorder::AddDemoMarker()
@@ -698,7 +699,7 @@ void CDemoPlayer::DoTick()
 				Pause();
 				// Stop rendering when reaching end of file
 #if defined(CONF_VIDEORECORDER)
-				if(m_UseVideo && IVideo::Current())
+				if(m_UseVideo && IVideo::Current() && m_TimelineTime < 0.0)
 					Stop();
 #endif
 			}
@@ -845,6 +846,11 @@ int CDemoPlayer::Load(IStorage *pStorage, IConsole *pConsole, const char *pFilen
 
 	m_pConsole = pConsole;
 	str_copy(m_aFilename, pFilename);
+	m_TimelineTime = -1.0;
+	if(IOHANDLE Source = pStorage->OpenFile(pFilename, IOFLAG_READ, StorageType, m_aSourceFilename, sizeof(m_aSourceFilename)))
+		io_close(Source);
+	else
+		m_aSourceFilename[0] = '\0';
 	str_copy(m_aErrorMessage, "");
 
 	if(m_pConsole)
@@ -1242,7 +1248,14 @@ void CDemoPlayer::Update(bool RealTime)
 			SetSpeedIndex(DEMO_SPEED_INDEX_DEFAULT);
 		}
 
-		m_Info.m_CurrentTime += (int64_t)(DeltaTime * (double)m_Info.m_Info.m_Speed);
+		if(m_TimelineTime >= 0.0)
+		{
+			// Keep the terminal snapshot as look-ahead, avoiding EOF during a sequence.
+			const double LastTime = (m_Info.m_Info.m_LastTick - 1.001) / SERVER_TICK_SPEED;
+			m_Info.m_CurrentTime = (int64_t)(std::min(m_TimelineTime, LastTime) * Freq);
+		}
+		else
+			m_Info.m_CurrentTime += (int64_t)(DeltaTime * (double)m_Info.m_Info.m_Speed);
 
 		// Do more ticks until we reach the current time.
 		while(!m_Info.m_Info.m_Paused)
@@ -1412,6 +1425,7 @@ bool CDemoPlayer::GetDemoInfo(IStorage *pStorage, IConsole *pConsole, const char
 class CDemoRecordingListener : public CDemoPlayer::IListener
 {
 public:
+	int m_NumSnapshots = 0;
 	CDemoRecorder *m_pDemoRecorder;
 	CDemoPlayer *m_pDemoPlayer;
 	bool m_Stop;
@@ -1425,7 +1439,10 @@ public:
 		if(m_EndTick != -1 && pInfo->m_Info.m_CurrentTick > m_EndTick)
 			m_Stop = true;
 		else if(m_StartTick == -1 || pInfo->m_Info.m_CurrentTick >= m_StartTick)
+		{
 			m_pDemoRecorder->RecordSnapshot(pInfo->m_Info.m_CurrentTick, pData, Size);
+			++m_NumSnapshots;
+		}
 	}
 
 	void OnDemoPlayerMessage(void *pData, int Size) override
@@ -1448,6 +1465,11 @@ void CDemoEditor::Init(CSnapshotDelta *pSnapshotDelta, CSnapshotDelta *pSnapshot
 }
 
 bool CDemoEditor::Slice(const char *pDemo, const char *pDst, int StartTick, int EndTick, DEMOFUNC_FILTER pfnFilter, void *pUser)
+{
+	return SliceWithCancel(pDemo, pDst, StartTick, EndTick, pfnFilter, pUser, nullptr);
+}
+
+bool CDemoEditor::SliceWithCancel(const char *pDemo, const char *pDst, int StartTick, int EndTick, DEMOFUNC_FILTER pfnFilter, void *pUser, const std::atomic<bool> *pCancel)
 {
 	CDemoPlayer DemoPlayer(m_pSnapshotDelta, m_pSnapshotDeltaSixup, false);
 	if(DemoPlayer.Load(m_pStorage, m_pConsole, pDemo, IStorage::TYPE_ALL_OR_ABSOLUTE) == -1)
@@ -1490,7 +1512,7 @@ bool CDemoEditor::Slice(const char *pDemo, const char *pDst, int StartTick, int 
 
 	DemoPlayer.Play();
 
-	while(DemoPlayer.IsPlaying() && !Listener.m_Stop)
+	while(DemoPlayer.IsPlaying() && !Listener.m_Stop && !(pCancel && pCancel->load()))
 	{
 		DemoPlayer.Update(false);
 
@@ -1499,7 +1521,7 @@ bool CDemoEditor::Slice(const char *pDemo, const char *pDst, int StartTick, int 
 	}
 
 	// Copy timeline markers to sliced demo
-	for(int i = 0; i < pInfo->m_Info.m_NumTimelineMarkers; i++)
+	for(int i = 0; i < pInfo->m_Info.m_NumTimelineMarkers && Listener.m_NumSnapshots >= 2; i++)
 	{
 		if((StartTick == -1 || pInfo->m_Info.m_aTimelineMarkers[i] >= StartTick) && (EndTick == -1 || pInfo->m_Info.m_aTimelineMarkers[i] <= EndTick))
 		{
@@ -1507,7 +1529,8 @@ bool CDemoEditor::Slice(const char *pDemo, const char *pDst, int StartTick, int 
 		}
 	}
 
+	const bool ReadFailed = DemoPlayer.ErrorMessage()[0] != '\0';
 	DemoPlayer.Stop();
-	DemoRecorder.Stop(IDemoRecorder::EStopMode::KEEP_FILE);
-	return true;
+	const int StopResult = DemoRecorder.Stop(IDemoRecorder::EStopMode::KEEP_FILE);
+	return !(pCancel && pCancel->load()) && !ReadFailed && StopResult == 0 && Listener.m_NumSnapshots >= 2;
 }

@@ -95,6 +95,8 @@ bool CLaser::HitCharacter(vec2 From, vec2 To)
 
 void CLaser::DoBounce()
 {
+	Collision()->SetEnvelopeTriggerContext(&GameWorld()->m_EnvelopeTriggers, m_Owner, m_Owner >= 0 && m_Owner < MAX_CLIENTS ? GameWorld()->m_Teams.Team(m_Owner) : 0, GameWorld()->GameTick());
+	Collision()->SetAxiomQuadTick(GameWorld()->GameTick(), GameWorld()->GameTickSpeed());
 	m_EvalTick = GameWorld()->GameTick();
 
 	if(m_Energy < 0)

@@ -538,7 +538,8 @@ void CMapView::Render(CUIRect View)
 
 						if(Editor()->QuadKnife()->IsActive())
 						{
-							Editor()->QuadKnife()->DoSlice();
+							if(LayerIndex == Map()->m_QuadKnifeState.m_LayerIndex)
+								Editor()->QuadKnife()->DoSlice();
 						}
 						else
 						{

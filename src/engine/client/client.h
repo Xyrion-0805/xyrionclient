@@ -559,6 +559,7 @@ public:
 	void DemoSliceBegin() override;
 	void DemoSliceEnd() override;
 	void DemoSlice(const char *pDstPath, CLIENTFUNC_FILTER pfnFilter, void *pUser) override;
+	std::shared_ptr<CDemoProjectExport> ExportDemoClips(const std::vector<demo_edit::SClip> &Clips, const char *pFolder, bool RemoveChat) override;
 	virtual void SaveReplay(int Length, const char *pFilename = "");
 
 	bool EditorHasUnsavedData() const override { return m_pEditor->HasUnsavedData(); }

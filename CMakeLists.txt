@@ -2112,7 +2112,7 @@ set(EXPECTED_DATA
   skins7/xmas_hat.png
   strong_weak.png
   tclient/builtinscripts/sayemoticon.chai
-  tclient/bestclient_media.ps1
+  tclient/qm_system_media.ps1
   tclient/editor_zh.txt
   tclient/fonts/Cabin-Regular.ttf
   tclient/fonts/FreeSansBold.ttf
@@ -2476,6 +2476,7 @@ set_src(ENGINE_SHARED GLOB_RECURSE src/engine/shared
   config_includes.h
   config_variables.h
   config_variables_tclient.h
+  xyrion_sound_toggles.h
   config_variables_bestclient.h
   config_variables_qmclient.h
   console.cpp
@@ -2485,6 +2486,8 @@ set_src(ENGINE_SHARED GLOB_RECURSE src/engine/shared
   datafile.cpp
   datafile.h
   demo.cpp
+  demo_project.cpp
+  demo_project.h
   demo.h
   econ.cpp
   econ.h
@@ -2591,8 +2594,12 @@ set_src(GAME_SHARED GLOB src/game
   alloc.h
   axiom_quad_collision.cpp
   axiom_quad_collision.h
+  envelope_trigger.cpp
+  envelope_trigger.h
   collision.cpp
   collision.h
+  tee_balance_physics.cpp
+  tee_balance_physics.h
   gamecore.cpp
   gamecore.h
   layers.cpp
@@ -2753,6 +2760,8 @@ if(CLIENT)
     client.h
     demoedit.cpp
     demoedit.h
+    demo_project_export.cpp
+    demo_project_export.h
     discord.cpp
     enums.h
     favorites.cpp
@@ -2864,6 +2873,8 @@ if(CLIENT)
     components/menus.h
     components/menus_browser.cpp
     components/menus_demo.cpp
+    components/demo_timeline.cpp
+    components/demo_timeline.h
     components/menus_ingame.cpp
     components/menus_ingame_touch_controls.cpp
     components/menus_ingame_touch_controls.h
@@ -2919,8 +2930,6 @@ if(CLIENT)
     components/tclient/data_version.h
     components/tclient/menus_tclient.cpp
     components/tclient/menus_xyrion.cpp
-    components/tclient/tee_accessories.cpp
-    components/tclient/tee_accessories.h
     components/tclient/menus_mods.cpp
     components/tclient/translation_util.cpp
     components/tclient/translation_util.h
@@ -2989,10 +2998,18 @@ if(CLIENT)
     components/bestclient/snap_tap.h
     components/bestclient/media_decoder.cpp
     components/bestclient/media_decoder.h
-    components/bestclient/music_player.cpp
-    components/bestclient/music_player.h
-    components/bestclient/music_player_lyrics.cpp
-    components/bestclient/music_player_lyrics.h
+    components/qmclient/scoreboard_media_controls.cpp
+    components/qmclient/scoreboard_media_controls.h
+    components/system_media_controls.cpp
+    components/system_media_controls.h
+    components/hud_media_island.cpp
+    components/hud_media_island_logic.h
+    components/tclient/swap_countdown_message.cpp
+    components/tclient/swap_countdown_message.h
+    components/qmclient/netease/netease_lyric_parser.cpp
+    components/qmclient/netease/netease_lyric_parser.h
+    components/qmclient/netease/netease_lyric_timeline.cpp
+    components/qmclient/netease/netease_lyric_timeline.h
     components/bestclient/server_map_preview.cpp
     components/bestclient/server_map_preview.h
     components/bestclient/ui_animations.cpp
@@ -3013,6 +3030,9 @@ if(CLIENT)
     components/tclient/rescue_solver.cpp
     components/tclient/rescue_solver.h
     components/tclient/web_browser.cpp
+    components/tclient/pixel_move.cpp
+    components/tclient/tee_balance.cpp
+    components/tclient/tee_balance.h
     components/tclient/web_browser.h
     components/tclient/ai_reply_util.cpp
     components/tclient/ai_reply_util.h
@@ -3074,6 +3094,14 @@ if(CLIENT)
     qm_ime_manager.h
     qm_ime_candidate_popup.cpp
     qm_ime_candidate_popup.h
+    QmUi/SettingsCard.cpp
+    QmUi/SettingsCardGeometry.cpp
+    QmUi/SettingsCardDeck.cpp
+    QmUi/SettingsCardDeckLogic.cpp
+    QmUi/SettingsCardInfo.cpp
+    QmUi/QmCardOrderModel.cpp
+    QmUi/SettingsCardCollapseState.cpp
+    components/qm_settings_cards.cpp
     QmUi/QmLineInputMotion.cpp
     QmUi/QmLineInputMotion.h
     gameclient.cpp
@@ -3209,6 +3237,8 @@ if(CLIENT)
     quad_art.cpp
     quad_art.h
     quad_knife.cpp
+    quad_crop.cpp
+    quad_crop.h
     quad_knife.h
     quick_action.h
     quick_actions.cpp
@@ -3860,6 +3890,8 @@ if((GTEST_FOUND OR DOWNLOAD_GTEST) AND SERVER)
     qm_console_settings_layout_test.cpp
     qm_tooltip_ownership_test.cpp
     qm_gores_drown_tracker_test.cpp
+    demo_project.cpp
+    quad_crop.cpp
     qm_dummy_mini_view_layout_test.cpp
     qm_dummy_miniview_render_test.cpp
     qm_ime_platform_test.cpp
@@ -3869,14 +3901,27 @@ if((GTEST_FOUND OR DOWNLOAD_GTEST) AND SERVER)
     qm_chat_command_hud_test.cpp
     qm_steam_client_path_test.cpp
     qm_weapon_trajectory_test.cpp
+    qm_media_island_track_state_test.cpp
+    qm_media_island_satellite_test.cpp
+    qm_media_island_render_params_test.cpp
+    qm_media_island_motion_test.cpp
+    qm_media_island_layout_test.cpp
+    qm_media_island_content_test.cpp
+    netease_lyric_parser_test.cpp
+    netease_lyric_timeline_test.cpp
+    xyrion_balance_test.cpp
     xyrion_dummy_session_test.cpp
     xyrion_features_test.cpp
     # tidy-alphabetical-end
   )
   set(TESTS_EXTRA
     src/game/client/ui_rect_geometry.cpp
+    src/game/editor/quad_crop.cpp
     src/game/client/skin.cpp
     src/game/client/QmUi/QmAnimationBackend.cpp
+    src/game/client/QmUi/QmAnimResolve.cpp
+    src/game/client/components/qmclient/netease/netease_lyric_parser.cpp
+    src/game/client/components/qmclient/netease/netease_lyric_timeline.cpp
     src/game/client/QmUi/QmLineInputMotion.cpp
     src/game/client/components/bestclient/asset_editor_util.cpp
     src/game/client/components/tclient/translation_util.cpp

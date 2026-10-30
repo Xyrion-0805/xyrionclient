@@ -11,6 +11,7 @@ class CWebBrowser : public CComponent
 	std::shared_ptr<CImpl> m_pImpl;
 	bool m_RestoreFullscreen = false;
 	bool m_WasVisible = false;
+	bool m_WasInteractive = false;
 	static void ConToggle(IConsole::IResult *pResult, void *pUserData);
 
 public:
@@ -20,6 +21,8 @@ public:
 	void OnConsoleInit() override;
 	void OnInit() override;
 	void OnUpdate() override;
+	bool OnInput(const IInput::CEvent &Event) override;
+	bool OnCursorMove(float x, float y, IInput::ECursorType CursorType) override;
 	void OnShutdown() override;
 	void Toggle();
 };

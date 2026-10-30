@@ -321,19 +321,7 @@ void CMenus::RenderSettingsTClient(CUIRect MainView)
 	static int s_CurCustomTab = 0;
 
 	CUIRect TabBar, Button;
-	int TabCount = NUMBER_OF_TCLIENT_TABS;
-	for(int Tab = 0; Tab < NUMBER_OF_TCLIENT_TABS; ++Tab)
-	{
-		if(IsFlagSet(g_Config.m_TcTClientSettingsTabs, Tab))
-		{
-			TabCount--;
-			if(s_CurCustomTab == Tab)
-				s_CurCustomTab++;
-		}
-	}
-
-	MainView.HSplitTop(LineSize, &TabBar, &MainView);
-	const float TabWidth = TabBar.w / TabCount;
+	MainView.HSplitTop(ui_token::settings::SUB_TAB_HEIGHT, &TabBar, &MainView);
 	static CButtonContainer s_aPageTabs[NUMBER_OF_TCLIENT_TABS] = {};
 	const char *apTabNames[] = {
 		TCLocalize("Settings"),
@@ -343,78 +331,60 @@ void CMenus::RenderSettingsTClient(CUIRect MainView)
 		TCLocalize("Status Bar"),
 		TCLocalize("Info")};
 
+	std::array<CUIRect, NUMBER_OF_TCLIENT_TABS> Slots{};
+	std::array<int, NUMBER_OF_TCLIENT_TABS> Tabs{};
+	int TabCount = 0;
 	for(int Tab = 0; Tab < NUMBER_OF_TCLIENT_TABS; ++Tab)
+		if(!IsFlagSet(g_Config.m_TcTClientSettingsTabs, Tab))
+			Tabs[TabCount++] = Tab;
+	if(TabCount == 0)
 	{
-		if(IsFlagSet(g_Config.m_TcTClientSettingsTabs, Tab))
-			continue;
-
-		TabBar.VSplitLeft(TabWidth, &Button, &TabBar);
-		const int Corners = Tab == 0 ? IGraphics::CORNER_L : Tab == NUMBER_OF_TCLIENT_TABS - 1 ? IGraphics::CORNER_R :
-													 IGraphics::CORNER_NONE;
-		if(DoButton_MenuTab(&s_aPageTabs[Tab], apTabNames[Tab], s_CurCustomTab == Tab, &Button, Corners, nullptr, nullptr, nullptr, nullptr, 4.0f))
-			s_CurCustomTab = Tab;
+		// 配置隐藏全部页签时仍保留设置入口，避免除零和空页。
+		Tabs[TabCount++] = TCLIENT_TAB_SETTINGS;
 	}
+	if(std::find(Tabs.begin(), Tabs.begin() + TabCount, s_CurCustomTab) == Tabs.begin() + TabCount)
+		s_CurCustomTab = Tabs[0];
+	int ActiveTab = 0;
+	for(int Index = 0; Index < TabCount; ++Index)
+	{
+		TabBar.VSplitLeft(TabBar.w / float(TabCount - Index), &Slots[Index], &TabBar);
+		if(Tabs[Index] == s_CurCustomTab)
+			ActiveTab = Index;
+	}
+	const auto Style = SettingsCapsuleTabBarStyle();
+	const int Selected = ui_widget::CapsuleTabBar(TabBarUiContext(), MakeUiScopeHash("tclient-settings-tabs"), Slots.data(), TabCount, ActiveTab, Style);
+	if(Selected >= 0 && Selected < TabCount && s_CurCustomTab != Tabs[Selected])
+	{
+		Ui()->ClosePopupMenus();
+		Ui()->SetActiveItem(nullptr);
+		s_CurCustomTab = Tabs[Selected];
+	}
+	for(int Index = 0; Index < TabCount; ++Index)
+		DoButton_MenuTab(&s_aPageTabs[Tabs[Index]], apTabNames[Tabs[Index]], s_CurCustomTab == Tabs[Index], &Slots[Index], IGraphics::CORNER_ALL, nullptr, nullptr, nullptr, nullptr, ui_token::radius::PILL, nullptr, nullptr, 14.0f, true);
 
 	MainView.HSplitTop(Margin, nullptr, &MainView);
 
 	if(s_CurCustomTab == TCLIENT_TAB_SETTINGS)
 		RenderSettingsTClientSettings(MainView);
 	if(s_CurCustomTab == TCLIENT_TAB_BINDCHAT)
-		RenderSettingsTClientChatBinds(MainView);
+		RenderSettingsLegacyPanel(MainView, "xyrion-tclient:bindchat", TCLocalize("Chat Binds"), [&](CUIRect View) { RenderSettingsTClientChatBinds(View); });
 	if(s_CurCustomTab == TCLIENT_TAB_BINDWHEEL)
-		RenderSettingsTClientBindWheel(MainView);
+		RenderSettingsLegacyPanel(MainView, "xyrion-tclient:bindwheel", TCLocalize("Bind Wheel"), [&](CUIRect View) { RenderSettingsTClientBindWheel(View); });
 	if(s_CurCustomTab == TCLIENT_TAB_WARLIST)
-		RenderSettingsTClientWarList(MainView);
+		RenderSettingsLegacyPanel(MainView, "xyrion-tclient:warlist", TCLocalize("War List"), [&](CUIRect View) { RenderSettingsTClientWarList(View); });
 	if(s_CurCustomTab == TCLIENT_TAB_STATUSBAR)
-		RenderSettingsTClientStatusBar(MainView);
+		RenderSettingsLegacyPanel(MainView, "xyrion-tclient:statusbar", TCLocalize("Status Bar"), [&](CUIRect View) { RenderSettingsTClientStatusBar(View); });
 	if(s_CurCustomTab == TCLIENT_TAB_INFO)
-		RenderSettingsTClientInfo(MainView);
+		RenderSettingsLegacyPanel(MainView, "xyrion-tclient:info", TCLocalize("Info"), [&](CUIRect View) { RenderSettingsTClientInfo(View); });
 }
 
 void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 {
 	CUIRect Column, LeftView, RightView, Button, Label;
 
-	static CScrollRegion s_ScrollRegion;
-	CScrollRegionParams ScrollParams;
-	ScrollParams.m_ScrollUnit = 60.0f;
-	ScrollParams.m_ForceShowScrollbar = true;
-	ScrollParams.m_ScrollbarMargin = 5.0f;
-	s_ScrollRegion.Begin(&MainView, &ScrollParams);
-
-	static std::vector<CUIRect> s_SectionBoxes;
-	const float ScrollOffset = MainView.y;
-	static float s_PrevScrollOffset = 0.0f;
-
-	MainView.VSplitRight(5.0f, &MainView, nullptr); // Padding for scrollbar
-	MainView.VSplitLeft(5.0f, nullptr, &MainView); // Padding for scrollbar
-
-	MainView.VSplitMid(&LeftView, &RightView, MarginBetweenViews);
-	LeftView.VSplitLeft(MarginSmall, nullptr, &LeftView);
-	RightView.VSplitRight(MarginSmall, &RightView, nullptr);
-
-	for(CUIRect &Section : s_SectionBoxes)
-	{
-		float Padding = MarginBetweenViews * 0.6666f;
-		Section.w += Padding;
-		Section.h += Padding;
-		Section.x -= Padding * 0.5f;
-		Section.y -= Padding * 0.5f;
-		Section.y -= s_PrevScrollOffset - ScrollOffset;
-		Section.Draw(ColorRGBA(0.0f, 0.0f, 0.0f, 0.25f), IGraphics::CORNER_ALL, 10.0f);
-	}
-	s_PrevScrollOffset = ScrollOffset;
-	s_SectionBoxes.clear();
-
-	// ***** LeftView ***** //
-	Column = LeftView;
-
-	// ***** Visual Miscellaneous ***** //
-	Column.HSplitTop(Margin, nullptr, &Column);
-	s_SectionBoxes.push_back(Column);
-	Column.HSplitTop(HeadlineHeight, &Label, &Column);
-	Ui()->DoLabel(&Label, TCLocalize("Visual"), HeadlineFontSize, TEXTALIGN_ML);
-	Column.HSplitTop(MarginSmall, nullptr, &Column);
+	std::vector<SSettingsCardDefinition> Cards;
+	Cards.push_back(SettingsCardDefinition("xyrion-tclient:settings-0", TCLocalize("Visual"), 160.0f, [&](CUIRect &Content) {
+	Column = Content;
 
 	static std::vector<const char *> s_FontDropDownNames = {};
 	static CUi::SDropDownState s_FontDropDownState;
@@ -541,14 +511,13 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 	}
 
 	Column.HSplitTop(MarginExtraSmall, nullptr, &Column);
-	s_SectionBoxes.back().h = Column.y - s_SectionBoxes.back().y;
+	Content = Column;
+	}));
 
 	// ***** Anti Latency Tools ***** //
 	Column.HSplitTop(MarginBetweenSections, nullptr, &Column);
-	s_SectionBoxes.push_back(Column);
-	Column.HSplitTop(HeadlineHeight, &Label, &Column);
-	Ui()->DoLabel(&Label, TCLocalize("Anti Latency Tools"), HeadlineFontSize, TEXTALIGN_ML);
-	Column.HSplitTop(MarginSmall, nullptr, &Column);
+	Cards.push_back(SettingsCardDefinition("xyrion-tclient:settings-1", TCLocalize("Anti Latency Tools"), 160.0f, [&](CUIRect &Content) {
+	Column = Content;
 
 	Column.HSplitTop(LineSize, &Button, &Column);
 	Ui()->DoScrollbarOption(&g_Config.m_ClPredictionMargin, &g_Config.m_ClPredictionMargin, &Button, TCLocalize("Prediction Margin"), 10, 75, &CUi::ms_LinearScrollbarScale, CUi::SCROLLBAR_OPTION_NOCLAMPVALUE, "ms");
@@ -569,29 +538,26 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 	Column.HSplitTop(LineSize, &Button, &Column);
 	if(g_Config.m_TcPredMarginInFreeze)
 		Ui()->DoScrollbarOption(&g_Config.m_TcPredMarginInFreezeAmount, &g_Config.m_TcPredMarginInFreezeAmount, &Button, TCLocalize("Frozen Margin"), 0, 100, &CUi::ms_LinearScrollbarScale, 0, "ms");
-	s_SectionBoxes.back().h = Column.y - s_SectionBoxes.back().y;
+	Content = Column;
+	}));
 
 	// ***** Improved Anti Ping ***** //
 	Column.HSplitTop(MarginBetweenSections, nullptr, &Column);
-	s_SectionBoxes.push_back(Column);
-	Column.HSplitTop(HeadlineHeight, &Label, &Column);
-	Ui()->DoLabel(&Label, TCLocalize("Anti Ping Smoothing"), HeadlineFontSize, TEXTALIGN_ML);
-	Column.HSplitTop(MarginSmall, nullptr, &Column);
+	Cards.push_back(SettingsCardDefinition("xyrion-tclient:settings-2", TCLocalize("Anti Ping Smoothing"), 160.0f, [&](CUIRect &Content) {
+	Column = Content;
 
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcAntiPingImproved, TCLocalize("Use new smoothing algorithm"), &g_Config.m_TcAntiPingImproved, &Column, LineSize);
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcAntiPingStableDirection, TCLocalize("Optimistic prediction in stable direction"), &g_Config.m_TcAntiPingStableDirection, &Column, LineSize);
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcAntiPingNegativeBuffer, TCLocalize("Remember instability for longer"), &g_Config.m_TcAntiPingNegativeBuffer, &Column, LineSize);
 	Column.HSplitTop(LineSize, &Button, &Column);
 	Ui()->DoScrollbarOption(&g_Config.m_TcAntiPingUncertaintyScale, &g_Config.m_TcAntiPingUncertaintyScale, &Button, TCLocalize("Uncertainty duration"), 50, 400, &CUi::ms_LinearScrollbarScale, CUi::SCROLLBAR_OPTION_NOCLAMPVALUE, "%");
-	s_SectionBoxes.back().h = Column.y - s_SectionBoxes.back().y;
+	Content = Column;
+	}));
 
 	// ***** Execute on join ***** //
 	Column.HSplitTop(MarginBetweenSections, nullptr, &Column);
-	s_SectionBoxes.push_back(Column);
-
-	Column.HSplitTop(HeadlineHeight, &Label, &Column);
-	Ui()->DoLabel(&Label, TCLocalize("Auto execute"), HeadlineFontSize, TEXTALIGN_ML);
-	Column.HSplitTop(MarginSmall, nullptr, &Column);
+	Cards.push_back(SettingsCardDefinition("xyrion-tclient:settings-3", TCLocalize("Auto execute"), 160.0f, [&](CUIRect &Content) {
+	Column = Content;
 
 	{
 		CUIRect Box;
@@ -618,23 +584,21 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 	Column.HSplitTop(LineSize, &Button, &Column);
 	DoSliderWithScaledValue(&g_Config.m_TcExecuteOnJoinDelay, &g_Config.m_TcExecuteOnJoinDelay, &Button, TCLocalize("Delay"), 140, 2000, 20, &CUi::ms_LinearScrollbarScale, CUi::SCROLLBAR_OPTION_NOCLAMPVALUE, "ms");
 	Column.HSplitTop(MarginExtraSmall, nullptr, &Column);
-	s_SectionBoxes.back().h = Column.y - s_SectionBoxes.back().y;
+	Content = Column;
+	}));
 
 	// ***** Teams ***** //
 	Column.HSplitTop(MarginBetweenSections, nullptr, &Column);
-	s_SectionBoxes.push_back(Column);
-	Column.HSplitTop(HeadlineHeight, &Label, &Column);
-	Ui()->DoLabel(&Label, TCLocalize("Teams"), HeadlineFontSize, TEXTALIGN_ML);
-	Column.HSplitTop(MarginSmall, nullptr, &Column);
+	Cards.push_back(SettingsCardDefinition("xyrion-tclient:settings-4", TCLocalize("Teams"), 160.0f, [&](CUIRect &Content) {
+	Column = Content;
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcAutoLockTeam, TCLocalize("Automatically lock the team after joining"), &g_Config.m_TcAutoLockTeam, &Column, LineSize);
-	s_SectionBoxes.back().h = Column.y - s_SectionBoxes.back().y;
+	Content = Column;
+	}));
 
 	// ***** Voting ***** //
 	Column.HSplitTop(MarginBetweenSections, nullptr, &Column);
-	s_SectionBoxes.push_back(Column);
-	Column.HSplitTop(HeadlineHeight, &Label, &Column);
-	Ui()->DoLabel(&Label, TCLocalize("Voting"), HeadlineFontSize, TEXTALIGN_ML);
-	Column.HSplitTop(MarginSmall, nullptr, &Column);
+	Cards.push_back(SettingsCardDefinition("xyrion-tclient:settings-5", TCLocalize("Voting"), 160.0f, [&](CUIRect &Content) {
+	Column = Content;
 
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcAutoVoteWhenFar, TCLocalize("Auto vote no to map changes when far"), &g_Config.m_TcAutoVoteWhenFar, &Column, LineSize);
 	Column.HSplitTop(LineSize, &Button, &Column);
@@ -651,14 +615,13 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 
 	Column.HSplitTop(MarginExtraSmall, nullptr, &Column);
 
-	s_SectionBoxes.back().h = Column.y - s_SectionBoxes.back().y;
+	Content = Column;
+	}));
 
 	// ***** Auto Reply ***** //
 	Column.HSplitTop(MarginBetweenSections, nullptr, &Column);
-	s_SectionBoxes.push_back(Column);
-	Column.HSplitTop(HeadlineHeight, &Label, &Column);
-	Ui()->DoLabel(&Label, TCLocalize("Auto Reply"), HeadlineFontSize, TEXTALIGN_ML);
-	Column.HSplitTop(MarginSmall, nullptr, &Column);
+	Cards.push_back(SettingsCardDefinition("xyrion-tclient:settings-6", TCLocalize("Auto Reply"), 160.0f, [&](CUIRect &Content) {
+	Column = Content;
 
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcAutoReplyMuted, TCLocalize("Auto reply to muted players"), &g_Config.m_TcAutoReplyMuted, &Column, LineSize);
 	CUIRect MutedReply;
@@ -683,14 +646,13 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 		Ui()->DoEditBox(&s_MinimizedReply, &MinimizedReply, EditBoxFontSize);
 	}
 	Column.HSplitTop(MarginExtraSmall, nullptr, &Column);
-	s_SectionBoxes.back().h = Column.y - s_SectionBoxes.back().y;
+	Content = Column;
+	}));
 
 	// ***** Player Indicator ***** //
 	Column.HSplitTop(MarginBetweenSections, nullptr, &Column);
-	s_SectionBoxes.push_back(Column);
-	Column.HSplitTop(HeadlineHeight, &Label, &Column);
-	Ui()->DoLabel(&Label, TCLocalize("Player Indicator"), HeadlineFontSize, TEXTALIGN_ML);
-	Column.HSplitTop(MarginSmall, nullptr, &Column);
+	Cards.push_back(SettingsCardDefinition("xyrion-tclient:settings-7", TCLocalize("Player Indicator"), 160.0f, [&](CUIRect &Content) {
+	Column = Content;
 
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcPlayerIndicator, TCLocalize("Show any enabled Indicators"), &g_Config.m_TcPlayerIndicator, &Column, LineSize);
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcIndicatorHideVisible, TCLocalize("Hide indicator for tees on your screen"), &g_Config.m_TcIndicatorHideVisible, &Column, LineSize);
@@ -735,14 +697,13 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 		DoLine_ColorPicker(&s_IndicatorDeadColorId, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &Column, TCLocalize("Indicator in freeze color"), &g_Config.m_TcIndicatorFreeze, ColorRGBA(0.0f, 0.0f, 0.0f), false);
 		DoLine_ColorPicker(&s_IndicatorSavedColorId, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &Column, TCLocalize("Indicator safe color"), &g_Config.m_TcIndicatorSaved, ColorRGBA(0.0f, 0.0f, 0.0f), false);
 	}
-	s_SectionBoxes.back().h = Column.y - s_SectionBoxes.back().y;
+	Content = Column;
+	}));
 
 	// ***** Pet ***** //
 	Column.HSplitTop(MarginBetweenSections, nullptr, &Column);
-	s_SectionBoxes.push_back(Column);
-	Column.HSplitTop(HeadlineHeight, &Label, &Column);
-	Ui()->DoLabel(&Label, TCLocalize("Pet"), HeadlineFontSize, TEXTALIGN_ML);
-	Column.HSplitTop(MarginSmall, nullptr, &Column);
+	Cards.push_back(SettingsCardDefinition("xyrion-tclient:settings-8", TCLocalize("Pet"), 160.0f, [&](CUIRect &Content) {
+	Column = Content;
 
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcPetShow, TCLocalize("Show the pet"), &g_Config.m_TcPetShow, &Column, LineSize);
 	Column.HSplitTop(LineSize, &Button, &Column);
@@ -791,18 +752,15 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 	int PetEmote = g_Config.m_ClPlayerDefaultEyes;
 	RenderTools()->RenderTee(pIdleState, &TeeInfo, PetEmote, Dir, TeeRenderPos);
 
-	s_SectionBoxes.back().h = Column.y - s_SectionBoxes.back().y;
+	Content = Column;
+	}));
 
 	// ***** RightView ***** //
-	LeftView = Column;
-	Column = RightView;
 
 	// ***** HUD ***** //
 	Column.HSplitTop(Margin, nullptr, &Column);
-	s_SectionBoxes.push_back(Column);
-	Column.HSplitTop(HeadlineHeight, &Label, &Column);
-	Ui()->DoLabel(&Label, TCLocalize("HUD"), HeadlineFontSize, TEXTALIGN_ML);
-	Column.HSplitTop(MarginSmall, nullptr, &Column);
+	Cards.push_back(SettingsCardDefinition("xyrion-tclient:settings-9", TCLocalize("HUD"), 160.0f, [&](CUIRect &Content) {
+	Column = Content;
 
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcMiniVoteHud, TCLocalize("Show mini vote HUD"), &g_Config.m_TcMiniVoteHud, &Column, LineSize);
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcMiniDebug, TCLocalize("Show position and angle (mini debug)"), &g_Config.m_TcMiniDebug, &Column, LineSize);
@@ -853,14 +811,13 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 	}
 
 	Column.HSplitTop(MarginExtraSmall, nullptr, &Column);
-	s_SectionBoxes.back().h = Column.y - s_SectionBoxes.back().y;
+	Content = Column;
+	}));
 
 	// ***** Frozen Tee Display ***** //
 	Column.HSplitTop(MarginBetweenSections, nullptr, &Column);
-	s_SectionBoxes.push_back(Column);
-	Column.HSplitTop(HeadlineHeight, &Label, &Column);
-	Ui()->DoLabel(&Label, TCLocalize("Frozen Tee Display"), HeadlineFontSize, TEXTALIGN_ML);
-	Column.HSplitTop(MarginSmall, nullptr, &Column);
+	Cards.push_back(SettingsCardDefinition("xyrion-tclient:settings-10", TCLocalize("Frozen Tee Display"), 160.0f, [&](CUIRect &Content) {
+	Column = Content;
 
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcShowFrozenHud, TCLocalize("Show frozen tee display"), &g_Config.m_TcShowFrozenHud, &Column, LineSize);
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcShowFrozenHudSkins, TCLocalize("Use skins instead of ninja tees"), &g_Config.m_TcShowFrozenHudSkins, &Column, LineSize);
@@ -885,14 +842,13 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 				g_Config.m_TcShowFrozenText = g_Config.m_TcShowFrozenText != 2 ? 2 : 1;
 		}
 	}
-	s_SectionBoxes.back().h = Column.y - s_SectionBoxes.back().y;
+	Content = Column;
+	}));
 
 	// ***** Tile Outlines ***** //
 	Column.HSplitTop(MarginBetweenSections, nullptr, &Column);
-	s_SectionBoxes.push_back(Column);
-	Column.HSplitTop(HeadlineHeight, &Label, &Column);
-	Ui()->DoLabel(&Label, TCLocalize("Tile Outlines"), HeadlineFontSize, TEXTALIGN_ML);
-	Column.HSplitTop(MarginSmall, nullptr, &Column);
+	Cards.push_back(SettingsCardDefinition("xyrion-tclient:settings-11", TCLocalize("Tile Outlines"), 160.0f, [&](CUIRect &Content) {
+	Column = Content;
 
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcOutline, TCLocalize("Show any enabled outlines"), &g_Config.m_TcOutline, &Column, LineSize);
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcOutlineEntities, TCLocalize("Only show outlines in entities"), &g_Config.m_TcOutlineEntities, &Column, LineSize);
@@ -932,14 +888,13 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 	// DoLine_ColorPicker(&s_OutlineColorTeleId, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &Column, TCLocalize("Teleporter outline color"), &g_Config.m_TcOutlineColorTele, ColorRGBA(0.0f, 0.0f, 0.0f), false);
 	// DoLine_ColorPicker(&s_OutlineColorUnfreezeId, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &Column, TCLocalize("Unfreeze outline color"), &g_Config.m_TcOutlineColorUnfreeze, ColorRGBA(0.0f, 0.0f, 0.0f), false);
 	// DoLine_ColorPicker(&s_OutlineColorKillId, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &Column, TCLocalize("Kill outline color"), &g_Config.m_TcOutlineColorKill, ColorRGBA(0.0f, 0.0f, 0.0f), false);
-	s_SectionBoxes.back().h = Column.y - s_SectionBoxes.back().y;
+	Content = Column;
+	}));
 
 	// ***** Ghost Tools ***** //
 	Column.HSplitTop(MarginBetweenSections, nullptr, &Column);
-	s_SectionBoxes.push_back(Column);
-	Column.HSplitTop(HeadlineHeight, &Label, &Column);
-	Ui()->DoLabel(&Label, TCLocalize("Ghost Tools"), HeadlineFontSize, TEXTALIGN_ML);
-	Column.HSplitTop(MarginSmall, nullptr, &Column);
+	Cards.push_back(SettingsCardDefinition("xyrion-tclient:settings-12", TCLocalize("Ghost Tools"), 160.0f, [&](CUIRect &Content) {
+	Column = Content;
 
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcShowOthersGhosts, TCLocalize("Show unpredicted ghosts for other players"), &g_Config.m_TcShowOthersGhosts, &Column, LineSize);
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcSwapGhosts, TCLocalize("Swap ghosts and normal players"), &g_Config.m_TcSwapGhosts, &Column, LineSize);
@@ -953,14 +908,13 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 	static CButtonContainer s_ReaderButtonGhost, s_ClearButtonGhost;
 	DoLine_KeyReader(Column, s_ReaderButtonGhost, s_ClearButtonGhost, TCLocalize("Toggle ghosts key"), "toggle tc_show_others_ghosts 0 1");
 
-	s_SectionBoxes.back().h = Column.y - s_SectionBoxes.back().y;
+	Content = Column;
+	}));
 
 	// ***** Rainbow ***** //
 	Column.HSplitTop(MarginBetweenSections, nullptr, &Column);
-	s_SectionBoxes.push_back(Column);
-	Column.HSplitTop(HeadlineHeight, &Label, &Column);
-	Ui()->DoLabel(&Label, TCLocalize("Rainbow"), HeadlineFontSize, TEXTALIGN_ML);
-	Column.HSplitTop(MarginSmall, nullptr, &Column);
+	Cards.push_back(SettingsCardDefinition("xyrion-tclient:settings-13", TCLocalize("Rainbow"), 160.0f, [&](CUIRect &Content) {
+	Column = Content;
 
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcRainbowTees, TCLocalize("Rainbow Tees"), &g_Config.m_TcRainbowTees, &Column, LineSize);
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcRainbowWeapon, TCLocalize("Rainbow weapons"), &g_Config.m_TcRainbowWeapon, &Column, LineSize);
@@ -985,15 +939,14 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 	Column.HSplitTop(LineSize, &Button, &Column);
 	Ui()->DoScrollbarOption(&g_Config.m_TcRainbowSpeed, &g_Config.m_TcRainbowSpeed, &Button, TCLocalize("Rainbow speed"), 0, 5000, &CUi::ms_LogarithmicScrollbarScale, 0, "%");
 	Column.HSplitTop(MarginExtraSmall, nullptr, &Column);
-	s_SectionBoxes.back().h = Column.y - s_SectionBoxes.back().y;
+	Content = Column;
+	}));
 	Column.HSplitTop(MarginSmall, nullptr, &Column);
 
 	// ***** Tee Trails ***** //
 	Column.HSplitTop(MarginBetweenSections, nullptr, &Column);
-	s_SectionBoxes.push_back(Column);
-	Column.HSplitTop(HeadlineHeight, &Label, &Column);
-	Ui()->DoLabel(&Label, TCLocalize("Tee Trails"), HeadlineFontSize, TEXTALIGN_ML);
-	Column.HSplitTop(MarginSmall, nullptr, &Column);
+	Cards.push_back(SettingsCardDefinition("xyrion-tclient:settings-14", TCLocalize("Tee Trails"), 160.0f, [&](CUIRect &Content) {
+	Column = Content;
 
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcTeeTrail, TCLocalize("Enable tee trails"), &g_Config.m_TcTeeTrail, &Column, LineSize);
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcTeeTrailOthers, TCLocalize("Show other tees' trails"), &g_Config.m_TcTeeTrailOthers, &Column, LineSize);
@@ -1029,15 +982,14 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 	Column.HSplitTop(LineSize, &Button, &Column);
 	Ui()->DoScrollbarOption(&g_Config.m_TcTeeTrailAlpha, &g_Config.m_TcTeeTrailAlpha, &Button, TCLocalize("Trail alpha"), 0, 100);
 
-	s_SectionBoxes.back().h = Column.y - s_SectionBoxes.back().y;
+	Content = Column;
+	}));
 	Column.HSplitTop(MarginSmall, nullptr, &Column);
 
 	// ***** BG Draw ***** //
 	Column.HSplitTop(MarginBetweenSections, nullptr, &Column);
-	s_SectionBoxes.push_back(Column);
-	Column.HSplitTop(HeadlineHeight, &Label, &Column);
-	Ui()->DoLabel(&Label, TCLocalize("Background Draw"), HeadlineFontSize, TEXTALIGN_ML);
-	Column.HSplitTop(MarginSmall, nullptr, &Column);
+	Cards.push_back(SettingsCardDefinition("xyrion-tclient:settings-15", TCLocalize("Background Draw"), 160.0f, [&](CUIRect &Content) {
+	Column = Content;
 
 	static CButtonContainer s_BgDrawColor;
 	DoLine_ColorPicker(&s_BgDrawColor, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &Column, TCLocalize("Color"), &g_Config.m_TcBgDrawColor, ColorRGBA(1.0f, 1.0f, 1.0f), false);
@@ -1054,15 +1006,14 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 	static CButtonContainer s_ReaderButtonDraw, s_ClearButtonDraw;
 	DoLine_KeyReader(Column, s_ReaderButtonDraw, s_ClearButtonDraw, TCLocalize("Draw where mouse is"), "+bg_draw");
 
-	s_SectionBoxes.back().h = Column.y - s_SectionBoxes.back().y;
+	Content = Column;
+	}));
 	Column.HSplitTop(MarginSmall, nullptr, &Column);
 
 	// ***** Finish Name ***** //
 	Column.HSplitTop(MarginBetweenSections, nullptr, &Column);
-	s_SectionBoxes.push_back(Column);
-	Column.HSplitTop(HeadlineHeight, &Label, &Column);
-	Ui()->DoLabel(&Label, TCLocalize("Finish Name"), HeadlineFontSize, TEXTALIGN_ML);
-	Column.HSplitTop(MarginSmall, nullptr, &Column);
+	Cards.push_back(SettingsCardDefinition("xyrion-tclient:settings-16", TCLocalize("Finish Name"), 160.0f, [&](CUIRect &Content) {
+	Column = Content;
 
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcChangeNameNearFinish, TCLocalize("Attempt to change your name when near finish"), &g_Config.m_TcChangeNameNearFinish, &Column, LineSize);
 	// Column.HSplitTop(LineSize, &Button, &Column); // TODO finish scan radius
@@ -1072,14 +1023,13 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 	Ui()->DoLabel(&Label, TCLocalize("Finish Name:"), FontSize, TEXTALIGN_ML);
 	static CLineInput s_FinishName(g_Config.m_TcFinishName, sizeof(g_Config.m_TcFinishName));
 	Ui()->DoEditBox(&s_FinishName, &Button, EditBoxFontSize);
-	s_SectionBoxes.back().h = Column.y - s_SectionBoxes.back().y;
+	Content = Column;
+	}));
 
 	// ***** Translate ***** //
 	Column.HSplitTop(MarginBetweenSections, nullptr, &Column);
-	s_SectionBoxes.push_back(Column);
-	Column.HSplitTop(HeadlineHeight, &Label, &Column);
-	Ui()->DoLabel(&Label, TCLocalize("Translate"), HeadlineFontSize, TEXTALIGN_ML);
-	Column.HSplitTop(MarginSmall, nullptr, &Column);
+	Cards.push_back(SettingsCardDefinition("xyrion-tclient:settings-17", TCLocalize("Translate"), 160.0f, [&](CUIRect &Content) {
+	Column = Content;
 
 	// Current backend's language table -- Google and LibreTranslate genuinely
 	// support different language sets (see translate.h/.cpp's
@@ -1176,19 +1126,10 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 		Ui()->DoEditBox(&s_TranslateKey, &KeyBox, EditBoxFontSize);
 	}
 	Column.HSplitTop(MarginExtraSmall, nullptr, &Column);
-	s_SectionBoxes.back().h = Column.y - s_SectionBoxes.back().y;
+	Content = Column;
+	}));
 
-	// ***** END OF PAGE 1 SETTINGS ***** //
-	RightView = Column;
-
-	// Scroll
-	CUIRect ScrollRegion;
-	ScrollRegion.x = MainView.x;
-	ScrollRegion.y = std::max(LeftView.y, RightView.y) + MarginSmall * 2.0f;
-	ScrollRegion.w = MainView.w;
-	ScrollRegion.h = 0.0f;
-	s_ScrollRegion.AddRect(ScrollRegion);
-	s_ScrollRegion.End();
+	RenderSettingsCardPage(MainView, "tclient-settings", Cards);
 }
 
 void CMenus::RenderSettingsTClientBindWheel(CUIRect MainView)

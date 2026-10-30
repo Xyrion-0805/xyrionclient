@@ -25,6 +25,38 @@ TEST(QmGoresDrownTracker, SessionOnlyRunsInJoinedLocalTeam)
 	EXPECT_EQ(Tracker.Count(1), 1);
 }
 
+TEST(QmGoresDrownTracker, TeamKillRestartsAllLocalTeammates)
+{
+	CQmGoresDrownTracker Tracker;
+	ASSERT_TRUE(Tracker.BeginSession(true, true, true, 1));
+	Observe(Tracker, 1, false);
+	Observe(Tracker, 2, false);
+	Observe(Tracker, 1, true);
+	Observe(Tracker, 2, true);
+	ASSERT_EQ(Tracker.Count(1), 1);
+	ASSERT_EQ(Tracker.Count(2), 1);
+	Tracker.OnTeamKill(1);
+	EXPECT_EQ(Tracker.Count(1), 0);
+	EXPECT_EQ(Tracker.Count(2), 0);
+	EXPECT_TRUE(Tracker.BeginSession(true, true, true, 1));
+	Observe(Tracker, 1, false);
+	Observe(Tracker, 1, true);
+	EXPECT_EQ(Tracker.Count(1), 1);
+}
+
+TEST(QmGoresDrownTracker, OtherTeamsKillCannotClearLocalCounts)
+{
+	CQmGoresDrownTracker Tracker;
+	ASSERT_TRUE(Tracker.BeginSession(true, true, true, 1));
+	Observe(Tracker, 1, false);
+	Observe(Tracker, 1, true);
+	for(int Team : {0, 2, -1, static_cast<int>(NUM_DDRACE_TEAMS)})
+	{
+		Tracker.OnTeamKill(Team);
+		EXPECT_EQ(Tracker.Count(1), 1);
+	}
+}
+
 TEST(QmGoresDrownTracker, LeavingOrChangingLocalTeamClearsSessionCounts)
 {
 	CQmGoresDrownTracker Tracker;

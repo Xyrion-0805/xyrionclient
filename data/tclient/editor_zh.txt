@@ -1,4 +1,10 @@
 # Xyrion map editor: independent Chinese UI, without changing map data.
+Drag a rectangle to slice the selected quad.
+== 拖出矩形，裁剪选中的 Quad。
+Drag with the left mouse button to crop a rectangle. Release to create the slice. Hold Alt to ignore grid. Right click or Escape to cancel.
+== 按住左键拖出矩形，松开生成框内裁剪副本。按住 Alt 忽略网格，右键或 Esc 退出。
+Slice quad using rectangle
+== 矩形裁剪 Quad
 File
 == 文件
 Layers
@@ -666,3 +672,18 @@ Run a local server with the current map and connect you to it.
 []
 [Ctrl+Q] Add a new sound source.
 == [Ctrl+Q] 添加声源。
+[]
+ENVELOPE TRIGGER SOLO: Starts/stops/resets/loops an envelope for the player hitting it.
+== 包络触发器（个人）：为碰触的玩家启动、停止、重置或循环播放包络动画。
+[]
+ENVELOPE TRIGGER TEAM: Starts/stops/resets/loops an envelope for all players of a team.
+== 包络触发器（队伍）：为碰触玩家的整个队伍启动、停止、重置或循环播放包络动画。
+[]
+Set a trigger type for an envelope in a trigger zone
+== 为触发区内的指定包络设置播放方式。
+[]
+Set a trigger type all envelopes at spawn
+== 设置所有包络的初始播放方式。
+[]
+Make a tune zone trigger an envelope zone
+== 让调参区域触发指定的包络触发区。

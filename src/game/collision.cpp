@@ -149,6 +149,7 @@ void CCollision::Init(class CLayers *pLayers)
 void CCollision::Unload()
 {
 	m_pAxiomQuads.reset();
+	m_pEnvelopeTriggers = nullptr;
 	m_AxiomRoundStartTick = 0;
 	m_AxiomQuadTime = 0;
 	m_pTiles = nullptr;
@@ -191,6 +192,7 @@ void CCollision::SetAxiomQuadCollision(bool Enabled)
 
 void CCollision::SetAxiomQuadTick(int Tick, int TickSpeed)
 {
+	m_EnvelopeTick = Tick;
 	if(m_pAxiomQuads && TickSpeed > 0)
 		SetAxiomQuadTime((double(Tick) - m_AxiomRoundStartTick) / TickSpeed);
 }
@@ -201,7 +203,15 @@ void CCollision::SetAxiomQuadTime(double Seconds)
 		return;
 	m_AxiomQuadTime = Seconds;
 	if(m_pAxiomQuads)
-		m_pAxiomQuads->SetTime(Seconds);
+		m_pAxiomQuads->SetTime(Seconds, m_pEnvelopeTriggers, m_EnvelopeClientId, m_EnvelopeTeam, m_EnvelopeTick);
+}
+
+void CCollision::SetEnvelopeTriggerContext(const CEnvelopeTriggerRuntime *pTriggers, int ClientId, int Team, double Tick)
+{
+	m_pEnvelopeTriggers = pTriggers;
+	m_EnvelopeClientId = ClientId;
+	m_EnvelopeTeam = Team;
+	m_EnvelopeTick = Tick;
 }
 
 int CCollision::GetAxiomQuadTile(vec2 Pos) const

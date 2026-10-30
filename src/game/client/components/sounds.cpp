@@ -80,9 +80,30 @@ void CSounds::UpdateChannels()
 	}
 }
 
+std::span<const CSounds::SSoundToggle> CSounds::SoundToggles()
+{
+	static const SSoundToggle s_aToggles[] = {
+#define XYRION_SOUND(Name, Script, Sound, Label, Group) {&g_Config.m_##Name, Sound, #Script, Label, Group},
+#include <engine/shared/xyrion_sound_toggles.h>
+#undef XYRION_SOUND
+	};
+	return s_aToggles;
+}
+
+bool CSounds::IsSoundEnabled(int SetId)
+{
+	switch(SetId)
+	{
+#define XYRION_SOUND(Name, Script, Sound, Label, Group) case Sound: return g_Config.m_##Name != 0;
+#include <engine/shared/xyrion_sound_toggles.h>
+#undef XYRION_SOUND
+	default: return true;
+	}
+}
+
 int CSounds::GetSampleId(int SetId)
 {
-	if(!g_Config.m_SndEnable || !Sound()->IsSoundEnabled() || m_WaitForSoundJob || SetId < 0 || SetId >= g_pData->m_NumSounds)
+	if(!g_Config.m_SndEnable || !Sound()->IsSoundEnabled() || m_WaitForSoundJob || SetId < 0 || SetId >= g_pData->m_NumSounds || !IsSoundEnabled(SetId))
 		return -1;
 
 	CDataSoundset *pSet = &g_pData->m_aSounds[SetId];

@@ -609,6 +609,8 @@ void CCharacter::ResetInput()
 
 void CCharacter::PreTick()
 {
+	Collision()->SetEnvelopeTriggerContext(&GameWorld()->m_EnvelopeTriggers, GetCid(), Team(), GameWorld()->GameTick());
+	Collision()->SetAxiomQuadTick(GameWorld()->GameTick(), GameWorld()->GameTickSpeed());
 	if(!Collision()->AxiomQuadCollisionEnabled() || m_Core.m_HookState != HOOK_GRABBED || m_Core.HookedPlayer() != -1)
 		m_AxiomHookQuad = -1;
 	else if(m_AxiomHookQuad >= 0)
@@ -633,6 +635,8 @@ void CCharacter::PreTick()
 
 void CCharacter::Tick()
 {
+	Collision()->SetEnvelopeTriggerContext(&GameWorld()->m_EnvelopeTriggers, GetCid(), Team(), GameWorld()->GameTick());
+	Collision()->SetAxiomQuadTick(GameWorld()->GameTick(), GameWorld()->GameTickSpeed());
 	if(m_pGameWorld->m_WorldConfig.m_NoWeakHookAndBounce)
 	{
 		m_Core.TickDeferred();
@@ -668,6 +672,8 @@ void CCharacter::Tick()
 
 void CCharacter::TickDeferred()
 {
+	Collision()->SetEnvelopeTriggerContext(&GameWorld()->m_EnvelopeTriggers, GetCid(), Team(), GameWorld()->GameTick());
+	Collision()->SetAxiomQuadTick(GameWorld()->GameTick(), GameWorld()->GameTickSpeed());
 	m_Core.Move();
 	m_Core.Quantize();
 	m_Pos = m_Core.m_Pos;
@@ -848,6 +854,7 @@ bool CCharacter::IsSwitchActiveCb(unsigned char Number, void *pUser)
 
 void CCharacter::HandleTiles(int Index)
 {
+	GameWorld()->m_EnvelopeTriggers.HandleTile(*Collision(), Index, GetCid(), Team(), *TeamsCore(), m_LastEnvelopeTriggerZone, GameWorld()->GameTick());
 	int MapIndex = Index;
 	m_TileIndex = Collision()->GetTileIndex(MapIndex);
 	m_TileFIndex = Collision()->GetFrontTileIndex(MapIndex);
@@ -1440,6 +1447,7 @@ void CCharacter::AntiPingInterference(int ClientId, bool DisallowReset, bool Has
 
 void CCharacter::ResetPrediction()
 {
+	m_LastEnvelopeTriggerZone = -1;
 	SetSolo(false);
 	SetSuper(false);
 	m_Core.m_EndlessHook = false;
@@ -1487,6 +1495,7 @@ void CCharacter::Read(CNetObj_Character *pChar, CNetObj_DDNetCharacter *pExtende
 	// World copies retain their anchors during deterministic tick replay.
 	m_AxiomHookQuad = -1;
 	m_Core.Read((const CNetObj_CharacterCore *)pChar);
+	Collision()->SetEnvelopeTriggerContext(&GameWorld()->m_EnvelopeTriggers, GetCid(), Team(), GameWorld()->GameTick());
 	Collision()->SetAxiomQuadTick(GameWorld()->GameTick(), GameWorld()->GameTickSpeed());
 	if(m_Core.m_HookState == HOOK_GRABBED && m_Core.HookedPlayer() == -1)
 		Collision()->FindAxiomHookAnchor(m_Core.m_HookPos, &m_AxiomHookQuad, &m_AxiomHookLocalPos);

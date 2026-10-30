@@ -33,24 +33,15 @@ void CMenus::RenderSettingsDDNet(CUIRect MainView)
 	MainView.HSplitBottom(5.0f, &MainView, nullptr);
 #endif
 
-	// demo
-	CUIRect Demo;
-	MainView.HSplitTop(110.0f, &Demo, &MainView);
-	Demo.HSplitTop(30.0f, &Label, &Demo);
-	Ui()->DoLabel(&Label, Localize("Demo"), 20.0f, TEXTALIGN_ML);
-	Label.VSplitMid(nullptr, &Label, 20.0f);
-	Ui()->DoLabel(&Label, Localize("Ghost"), 20.0f, TEXTALIGN_ML);
-
-	Demo.HSplitTop(5.0f, nullptr, &Demo);
-	Demo.VSplitMid(&Left, &Right, 20.0f);
-
-	Left.HSplitTop(20.0f, &Button, &Left);
+	std::vector<SSettingsCardDefinition> Cards;
+	Cards.push_back(SettingsCardDefinition("deck:ddnet-demo", Localize("Demo"), 220.0f, [&](CUIRect &Content) {
+	Content.HSplitTop(20.0f, &Button, &Content);
 	if(DoButton_CheckBox(&g_Config.m_ClAutoRaceRecord, Localize("Save the best demo of each race"), g_Config.m_ClAutoRaceRecord, &Button))
 	{
 		g_Config.m_ClAutoRaceRecord ^= 1;
 	}
 
-	Left.HSplitTop(20.0f, &Button, &Left);
+	Content.HSplitTop(20.0f, &Button, &Content);
 	if(DoButton_CheckBox(&g_Config.m_ClReplays, Localize("Enable replays"), g_Config.m_ClReplays, &Button))
 	{
 		g_Config.m_ClReplays ^= 1;
@@ -60,11 +51,11 @@ void CMenus::RenderSettingsDDNet(CUIRect MainView)
 		}
 	}
 
-	Left.HSplitTop(20.0f, &Button, &Left);
+	Content.HSplitTop(20.0f, &Button, &Content);
 	if(g_Config.m_ClReplays)
 		Ui()->DoScrollbarOption(&g_Config.m_ClReplayLength, &g_Config.m_ClReplayLength, &Button, Localize("Default length"), 10, 600, &CUi::ms_LinearScrollbarScale, CUi::SCROLLBAR_OPTION_NOCLAMPVALUE);
 
-	Right.HSplitTop(20.0f, &Button, &Right);
+	Content.HSplitTop(20.0f, &Button, &Content);
 	if(DoButton_CheckBox(&g_Config.m_ClRaceGhost, Localize("Enable ghost"), g_Config.m_ClRaceGhost, &Button))
 	{
 		g_Config.m_ClRaceGhost ^= 1;
@@ -73,7 +64,7 @@ void CMenus::RenderSettingsDDNet(CUIRect MainView)
 
 	if(g_Config.m_ClRaceGhost)
 	{
-		Right.HSplitTop(20.0f, &Button, &Right);
+		Content.HSplitTop(20.0f, &Button, &Content);
 		Button.VSplitMid(&LeftLeft, &Button);
 		if(DoButton_CheckBox(&g_Config.m_ClRaceShowGhost, Localize("Show ghost"), g_Config.m_ClRaceShowGhost, &LeftLeft))
 		{
@@ -81,7 +72,7 @@ void CMenus::RenderSettingsDDNet(CUIRect MainView)
 		}
 		Ui()->DoScrollbarOption(&g_Config.m_ClRaceGhostAlpha, &g_Config.m_ClRaceGhostAlpha, &Button, Localize("Opacity"), 0, 100, &CUi::ms_LinearScrollbarScale, 0u, "%");
 
-		Right.HSplitTop(20.0f, &Button, &Right);
+		Content.HSplitTop(20.0f, &Button, &Content);
 		if(DoButton_CheckBox(&g_Config.m_ClRaceSaveGhost, Localize("Save ghost"), g_Config.m_ClRaceSaveGhost, &Button))
 		{
 			g_Config.m_ClRaceSaveGhost ^= 1;
@@ -89,7 +80,7 @@ void CMenus::RenderSettingsDDNet(CUIRect MainView)
 
 		if(g_Config.m_ClRaceSaveGhost)
 		{
-			Right.HSplitTop(20.0f, &Button, &Right);
+			Content.HSplitTop(20.0f, &Button, &Content);
 			if(DoButton_CheckBox(&g_Config.m_ClRaceGhostSaveBest, Localize("Only save improvements"), g_Config.m_ClRaceGhostSaveBest, &Button))
 			{
 				g_Config.m_ClRaceGhostSaveBest ^= 1;
@@ -97,18 +88,13 @@ void CMenus::RenderSettingsDDNet(CUIRect MainView)
 		}
 	}
 
-	// gameplay
-	CUIRect Gameplay;
-	MainView.HSplitTop(190.0f, &Gameplay, &MainView);
-	Gameplay.HSplitTop(30.0f, &Label, &Gameplay);
-	Ui()->DoLabel(&Label, Localize("Gameplay"), 20.0f, TEXTALIGN_ML);
-	Gameplay.HSplitTop(5.0f, nullptr, &Gameplay);
-	Gameplay.VSplitMid(&Left, &Right, 20.0f);
 
-	Left.HSplitTop(20.0f, &Button, &Left);
+	}));
+	Cards.push_back(SettingsCardDefinition("deck:ddnet-gameplay", Localize("Gameplay"), 420.0f, [&](CUIRect &Content) {
+	Content.HSplitTop(20.0f, &Button, &Content);
 	Ui()->DoScrollbarOption(&g_Config.m_ClOverlayEntities, &g_Config.m_ClOverlayEntities, &Button, Localize("Overlay entities"), 0, 100);
 
-	Left.HSplitTop(20.0f, &Button, &Left);
+	Content.HSplitTop(20.0f, &Button, &Content);
 	Button.VSplitMid(&LeftLeft, &Button);
 
 	if(DoButton_CheckBox(&g_Config.m_ClTextEntities, Localize("Show text entities"), g_Config.m_ClTextEntities, &LeftLeft))
@@ -120,7 +106,7 @@ void CMenus::RenderSettingsDDNet(CUIRect MainView)
 			GameClient()->m_MapImages.SetTextureScale(g_Config.m_ClTextEntitiesSize);
 	}
 
-	Left.HSplitTop(20.0f, &Button, &Left);
+	Content.HSplitTop(20.0f, &Button, &Content);
 	Button.VSplitMid(&LeftLeft, &Button);
 
 	if(DoButton_CheckBox(&g_Config.m_ClShowOthers, Localize("Show others"), g_Config.m_ClShowOthers == SHOW_OTHERS_ON, &LeftLeft))
@@ -130,34 +116,34 @@ void CMenus::RenderSettingsDDNet(CUIRect MainView)
 
 	GameClient()->m_Tooltips.DoToolTip(&g_Config.m_ClShowOthersAlpha, &Button, Localize("Adjust the opacity of entities belonging to other teams, such as tees and name plates"));
 
-	Left.HSplitTop(20.0f, &Button, &Left);
+	Content.HSplitTop(20.0f, &Button, &Content);
 	static int s_ShowOwnTeamId = 0;
 	if(DoButton_CheckBox(&s_ShowOwnTeamId, Localize("Show others (own team only)"), g_Config.m_ClShowOthers == SHOW_OTHERS_ONLY_TEAM, &Button))
 	{
 		g_Config.m_ClShowOthers = g_Config.m_ClShowOthers != SHOW_OTHERS_ONLY_TEAM ? SHOW_OTHERS_ONLY_TEAM : SHOW_OTHERS_OFF;
 	}
 
-	Left.HSplitTop(20.0f, &Button, &Left);
+	Content.HSplitTop(20.0f, &Button, &Content);
 	if(DoButton_CheckBox(&g_Config.m_ClShowQuads, Localize("Show background quads"), g_Config.m_ClShowQuads, &Button))
 	{
 		g_Config.m_ClShowQuads ^= 1;
 	}
 	GameClient()->m_Tooltips.DoToolTip(&g_Config.m_ClShowQuads, &Button, Localize("Quads are used for background decoration"));
 
-	Left.HSplitTop(20.0f, &Button, &Left);
+	Content.HSplitTop(20.0f, &Button, &Content);
 	if(Ui()->DoScrollbarOption(&g_Config.m_ClDefaultZoom, &g_Config.m_ClDefaultZoom, &Button, Localize("Default zoom"), 0, 20))
 		GameClient()->m_Camera.SetZoom(CCamera::ZoomStepsToValue(g_Config.m_ClDefaultZoom - 10), g_Config.m_ClSmoothZoomTime, true);
 
-	Right.HSplitTop(20.0f, &Button, &Right);
+	Content.HSplitTop(20.0f, &Button, &Content);
 	Ui()->DoScrollbarOption(&g_Config.m_ClPredictionMargin, &g_Config.m_ClPredictionMargin, &Button, Localize("Prediction margin"), 1, 300);
 
-	Right.HSplitTop(20.0f, &Button, &Right);
+	Content.HSplitTop(20.0f, &Button, &Content);
 	if(DoButton_CheckBox(&g_Config.m_ClPredictEvents, Localize("Predict events (experimental)"), g_Config.m_ClPredictEvents, &Button))
 	{
 		g_Config.m_ClPredictEvents ^= 1;
 	}
 
-	Right.HSplitTop(20.0f, &Button, &Right);
+	Content.HSplitTop(20.0f, &Button, &Content);
 	if(DoButton_CheckBox(&g_Config.m_ClAntiPing, Localize("AntiPing"), g_Config.m_ClAntiPing, &Button))
 	{
 		g_Config.m_ClAntiPing ^= 1;
@@ -172,7 +158,7 @@ void CMenus::RenderSettingsDDNet(CUIRect MainView)
 			{
 				int Pressed = std::min(g_Config.m_ClAntiPingPlayers, 2);
 				const int Prev = Pressed;
-				DoLine_RadioMenu(Right, Localize("AntiPing: predict other players"),
+				DoLine_RadioMenu(Content, Localize("AntiPing: predict other players"),
 					m_vButtonContainersAntiPingPlayers,
 					{Localize("Off", "AntiPing: predict other players"), Localize("All", "AntiPing: predict other players"), Localize("Interact", "AntiPing: predict other players")},
 					{0, 1, 2},
@@ -185,7 +171,7 @@ void CMenus::RenderSettingsDDNet(CUIRect MainView)
 			if(g_Config.m_ClAntiPingPlayers >= 2)
 			{
 				bool PrevChecked = g_Config.m_ClAntiPingPlayers == 3;
-				Right.HSplitTop(20.0f, &Button, &Right);
+				Content.HSplitTop(20.0f, &Button, &Content);
 				if(DoButton_CheckBox(&g_Config.m_ClAntiPingPlayers, Localize("Always predict frozen players"), PrevChecked, &Button))
 				{
 					g_Config.m_ClAntiPingPlayers = PrevChecked ? 2 : 3;
@@ -193,38 +179,25 @@ void CMenus::RenderSettingsDDNet(CUIRect MainView)
 			}
 		}
 
-		Right.HSplitTop(20.0f, &Button, &Right);
+		Content.HSplitTop(20.0f, &Button, &Content);
 		if(DoButton_CheckBox(&g_Config.m_ClAntiPingWeapons, Localize("AntiPing: predict weapons"), g_Config.m_ClAntiPingWeapons, &Button))
 		{
 			g_Config.m_ClAntiPingWeapons ^= 1;
 		}
 
-		Right.HSplitTop(20.0f, &Button, &Right);
+		Content.HSplitTop(20.0f, &Button, &Content);
 		if(DoButton_CheckBox(&g_Config.m_ClAntiPingGrenade, Localize("AntiPing: predict grenade paths"), g_Config.m_ClAntiPingGrenade, &Button))
 		{
 			g_Config.m_ClAntiPingGrenade ^= 1;
 		}
 	}
 
-	CUIRect Background, Miscellaneous;
-	MainView.VSplitMid(&Background, &Miscellaneous, 20.0f);
 
-	// background
-	Background.HSplitTop(30.0f, &Label, &Background);
-	Background.HSplitTop(5.0f, nullptr, &Background);
-	Ui()->DoLabel(&Label, Localize("Background"), 20.0f, TEXTALIGN_ML);
-
-	ColorRGBA GreyDefault(0.5f, 0.5f, 0.5f, 1);
-
-	static CButtonContainer s_ResetId1;
-	DoLine_ColorPicker(&s_ResetId1, 25.0f, 13.0f, 5.0f, &Background, Localize("Regular background color"), &g_Config.m_ClBackgroundColor, GreyDefault, false);
-
-	static CButtonContainer s_ResetId2;
-	DoLine_ColorPicker(&s_ResetId2, 25.0f, 13.0f, 5.0f, &Background, Localize("Entities background color"), &g_Config.m_ClBackgroundEntitiesColor, GreyDefault, false);
-
+	}));
+	Cards.push_back(SettingsCardDefinition("deck:ddnet-background", Localize("Background"), 200.0f, [&](CUIRect &Content) {
 	CUIRect EditBox, ReloadButton;
-	Background.HSplitTop(20.0f, &Label, &Background);
-	Background.HSplitTop(2.0f, nullptr, &Background);
+	Content.HSplitTop(20.0f, &Label, &Content);
+	Content.HSplitTop(2.0f, nullptr, &Content);
 	Label.VSplitLeft(100.0f, &Label, &EditBox);
 	EditBox.VSplitRight(60.0f, &EditBox, &Button);
 	Button.VSplitMid(&ReloadButton, &Button, 5.0f);
@@ -251,7 +224,7 @@ void CMenus::RenderSettingsDDNet(CUIRect MainView)
 		Ui()->DoPopupMenu(&s_PopupMapPickerId, Ui()->MouseX(), Ui()->MouseY(), 300.0f, 250.0f, &s_PopupMapPickerContext, PopupMapPicker);
 	}
 
-	Background.HSplitTop(20.0f, &Button, &Background);
+	Content.HSplitTop(20.0f, &Button, &Content);
 	const bool UseCurrentMap = str_comp(g_Config.m_ClBackgroundEntities, CURRENT_MAP) == 0;
 	static int s_UseCurrentMapId = 0;
 	if(DoButton_CheckBox(&s_UseCurrentMapId, Localize("Use current map as background"), UseCurrentMap, &Button))
@@ -263,42 +236,42 @@ void CMenus::RenderSettingsDDNet(CUIRect MainView)
 		GameClient()->m_Background.LoadBackground();
 	}
 
-	Background.HSplitTop(20.0f, &Button, &Background);
+	Content.HSplitTop(20.0f, &Button, &Content);
 	if(DoButton_CheckBox(&g_Config.m_ClBackgroundShowTilesLayers, Localize("Show tiles layers from BG map"), g_Config.m_ClBackgroundShowTilesLayers, &Button))
 		g_Config.m_ClBackgroundShowTilesLayers ^= 1;
 
-	// miscellaneous
-	Miscellaneous.HSplitTop(30.0f, &Label, &Miscellaneous);
-	Miscellaneous.HSplitTop(5.0f, nullptr, &Miscellaneous);
 
-	Ui()->DoLabel(&Label, Localize("Miscellaneous"), 20.0f, TEXTALIGN_ML);
-
+	}));
+	Cards.push_back(SettingsCardDefinition("deck:ddnet-miscellaneous", Localize("Miscellaneous"), 170.0f, [&](CUIRect &Content) {
 	static CButtonContainer s_ButtonTimeout;
-	Miscellaneous.HSplitTop(20.0f, &Button, &Miscellaneous);
+	Content.HSplitTop(20.0f, &Button, &Content);
 	if(DoButton_Menu(&s_ButtonTimeout, Localize("New random timeout code"), 0, &Button))
 	{
 		Client()->GenerateTimeoutSeed();
 	}
 
-	Miscellaneous.HSplitTop(5.0f, nullptr, &Miscellaneous);
-	Miscellaneous.HSplitTop(20.0f, &Label, &Miscellaneous);
-	Miscellaneous.HSplitTop(2.0f, nullptr, &Miscellaneous);
+	Content.HSplitTop(5.0f, nullptr, &Content);
+	Content.HSplitTop(20.0f, &Label, &Content);
+	Content.HSplitTop(2.0f, nullptr, &Content);
 	Ui()->DoLabel(&Label, Localize("Run on join"), 14.0f, TEXTALIGN_ML);
-	Miscellaneous.HSplitTop(20.0f, &Button, &Miscellaneous);
+	Content.HSplitTop(20.0f, &Button, &Content);
 	static CLineInput s_RunOnJoinInput(g_Config.m_ClRunOnJoin, sizeof(g_Config.m_ClRunOnJoin));
 	s_RunOnJoinInput.SetEmptyText(Localize("Chat command (e.g. showall 1)"));
 	Ui()->DoEditBox(&s_RunOnJoinInput, &Button, 14.0f);
 
 #if defined(CONF_FAMILY_WINDOWS)
 	static CButtonContainer s_ButtonUnregisterShell;
-	Miscellaneous.HSplitTop(10.0f, nullptr, &Miscellaneous);
-	Miscellaneous.HSplitTop(20.0f, &Button, &Miscellaneous);
+	Content.HSplitTop(10.0f, nullptr, &Content);
+	Content.HSplitTop(20.0f, &Button, &Content);
 	if(DoButton_Menu(&s_ButtonUnregisterShell, Localize("Unregister protocol and file extensions"), 0, &Button))
 	{
 		Client()->ShellUnregister();
 	}
 #endif
 
+
+	}));
+	RenderSettingsCardPage(MainView, "ddnet", Cards);
 	// Updater
 #if defined(CONF_AUTOUPDATE)
 	{

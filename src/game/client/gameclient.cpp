@@ -95,6 +95,7 @@ namespace
 {
 int EffectiveFastInputAmountMs()
 {
+	if(g_Config.m_XcPixelMove || g_Config.m_XcTeeBalanceRunning) return 0;
 	if(g_Config.m_BcInputs != BC_INPUTS_OFF)
 		return (int)std::ceil(BcInputs::EffectiveOffsetTicks() * 20.0f);
 	return g_Config.m_TcFastInput ? g_Config.m_TcFastInputAmount : 0;
@@ -102,6 +103,7 @@ int EffectiveFastInputAmountMs()
 
 bool EffectiveFastInputOthers()
 {
+	if(g_Config.m_XcPixelMove || g_Config.m_XcTeeBalanceRunning) return false;
 	return g_Config.m_BcInputs != BC_INPUTS_OFF ? BcInputs::AnyOthers() : g_Config.m_TcFastInput && g_Config.m_TcFastInputOthers;
 }
 } // namespace
@@ -177,6 +179,7 @@ void CGameClient::OnConsoleInit()
 					      &m_TClient, // TClient (Must be before chat and players)
 					      &m_AiReply,
 					      &m_WebBrowser,
+					      &m_DemoTimeline,
 					      &m_QmWeaponTrajectory,
 					      &m_Players,
 					      &m_MovingTilesBackground, // TClient
@@ -195,11 +198,12 @@ void CGameClient::OnConsoleInit()
 					      &m_PlayerIndicator, // TClient
 					      &m_Mod, // TClient
 					      &m_RescueSolver,
+					      &m_TeeBalance,
 					      &m_CustomCommunities, // TClient
 					      &m_Hud,
 					      &m_AspectRatio,
 					      &m_FinishPrediction,
-					      &m_MusicPlayer,
+					      &m_SystemMediaControls,
 					      &m_CloudInput,
 					      &m_SnapTap,
 					      &m_BcUiAnimations,
@@ -226,7 +230,7 @@ void CGameClient::OnConsoleInit()
 					      &m_MenuBackground});
 
 	// build the input stack
-	m_vpInput.insert(m_vpInput.end(), {&m_KeyBinder, // this will take over all input when we want to bind a key
+	m_vpInput.insert(m_vpInput.end(), {&m_DemoTimeline, &m_WebBrowser, &m_KeyBinder, // this will take over all input when we want to bind a key
 						  &m_Binds.m_SpecialBinds,
 						  &m_GameConsole,
 						  &m_Chat, // chat has higher prio, due to that you can quit it by pressing esc
@@ -262,6 +266,9 @@ void CGameClient::OnConsoleInit()
 
 	// register game commands to allow the client prediction to load settings from the map
 	Console()->Register("tune", "s[tuning] ?f[value]", CFGFLAG_GAME, ConTuneParam, this, "Tune variable to value");
+	Console()->Register("envelope_trigger", "i[zone] s[trigger_type] i[envelope]", CFGFLAG_GAME, ConEnvelopeTrigger, this, "Set a trigger type for an envelope in a trigger zone");
+	Console()->Register("envelope_trigger_spawn", "s[trigger_type]", CFGFLAG_GAME, ConEnvelopeTriggerSpawn, this, "Set the initial envelope playback mode");
+	Console()->Register("tune_zone_envelope_trigger", "i[zone] i[envelope_zone]", CFGFLAG_GAME, ConTuneZoneEnvelopeTrigger, this, "Make a tune zone activate an envelope zone");
 	Console()->Register("tune_zone", "i[zone] s[tuning] f[value]", CFGFLAG_GAME, ConTuneZone, this, "Tune in zone a variable to value");
 	Console()->Register("mapbug", "s[mapbug]", CFGFLAG_GAME, ConMapbug, this, "Enable map compatibility mode using the specified bug (example: grenade-doubleexplosion@ddnet.tw)");
 
@@ -664,7 +671,7 @@ void CGameClient::OnConnected()
 	m_Menus.RenderLoading(pConnectCaption, pLoadMapContent, 0);
 	m_Layers.Init(Map(), false, true);
 	m_Collision.Init(Layers());
-	m_Collision.SetAxiomQuadCollision(g_Config.m_XcAxiomQuadCollision != 0);
+	m_Collision.SetAxiomQuadCollision(g_Config.m_XcAxiomQuadCollision != 0 || m_aEnvelopeAuthority[g_Config.m_ClDummy]);
 	m_GameWorld.m_Core.InitSwitchers(m_Collision.m_HighestSwitchNumber);
 	m_GameWorld.m_PredictedEvents.clear();
 	m_RaceHelper.Init(this);
@@ -755,6 +762,7 @@ void CGameClient::OnReset()
 
 	std::fill(std::begin(m_aNextChangeInfo), std::end(m_aNextChangeInfo), -1);
 	std::fill(std::begin(m_aLocalIds), std::end(m_aLocalIds), -1);
+	std::fill(std::begin(m_aEnvelopeAuthority), std::end(m_aEnvelopeAuthority), false);
 	m_DummyInput = {};
 	m_HammerInput = {};
 	m_DummyFire = 0;
@@ -857,7 +865,7 @@ void CGameClient::UpdatePositions()
 void CGameClient::UpdateAxiomQuadCollision()
 {
 	const bool Online = Client()->State() == IClient::STATE_ONLINE || Client()->State() == IClient::STATE_DEMOPLAYBACK;
-	m_Collision.SetAxiomQuadCollision(Online && g_Config.m_XcAxiomQuadCollision != 0);
+	m_Collision.SetAxiomQuadCollision(Online && (g_Config.m_XcAxiomQuadCollision != 0 || m_aEnvelopeAuthority[g_Config.m_ClDummy]));
 	if(!m_Collision.AxiomQuadCollisionEnabled())
 		return;
 	const int RoundStart = m_Snap.m_pGameInfoObj ? m_Snap.m_pGameInfoObj->m_RoundStartTick : 0;
@@ -868,6 +876,8 @@ void CGameClient::UpdateAxiomQuadCollision()
 			!(m_Snap.m_SpecInfo.m_Active && m_Snap.m_SpecInfo.m_SpectatorId != SPEC_FREEVIEW);
 		const double Tick = Predicted ? Client()->PredGameTick(g_Config.m_ClDummy) - 1 + double(Client()->PredIntraGameTick(g_Config.m_ClDummy)) :
 			mix<double>(Client()->PrevGameTick(g_Config.m_ClDummy), Client()->GameTick(g_Config.m_ClDummy), Client()->IntraGameTick(g_Config.m_ClDummy));
+		const auto &Triggers = Predicted && m_PredictedWorld.m_EnvelopeTriggers.Enabled() ? m_PredictedWorld.m_EnvelopeTriggers : m_GameWorld.m_EnvelopeTriggers;
+		m_Collision.SetEnvelopeTriggerContext(m_aEnvelopeAuthority[g_Config.m_ClDummy] ? &Triggers : nullptr, m_aEnvelopeViewIds[g_Config.m_ClDummy], m_aEnvelopeViewTeams[g_Config.m_ClDummy], Tick);
 		m_Collision.SetAxiomQuadTime((Tick - RoundStart) / Client()->GameTickSpeed());
 	}
 }
@@ -1380,6 +1390,7 @@ void CGameClient::OnMessage(int MsgId, CUnpacker *pUnpacker, int Conn, bool Dumm
 	else if(MsgId == NETMSGTYPE_SV_KILLMSGTEAM)
 	{
 		CNetMsg_Sv_KillMsgTeam *pMsg = (CNetMsg_Sv_KillMsgTeam *)pRawMsg;
+		m_TClient.m_GoresDrownTracker.OnTeamKill(pMsg->m_Team);
 
 		// reset prediction
 		std::vector<std::pair<int, int>> vStrongWeakSorted;
@@ -1875,10 +1886,12 @@ void CGameClient::InvalidateSnapshot()
 
 void CGameClient::OnNewSnapshot(bool DummySwapped)
 {
-	m_Collision.SetAxiomQuadCollision(g_Config.m_XcAxiomQuadCollision != 0);
+	ReadEnvelopeSnapshot();
+	m_Collision.SetAxiomQuadCollision(g_Config.m_XcAxiomQuadCollision != 0 || m_aEnvelopeAuthority[g_Config.m_ClDummy]);
 	const auto *pQuadGameInfo = static_cast<const CNetObj_GameInfo *>(Client()->SnapFindItem(IClient::SNAP_CURRENT, NETOBJTYPE_GAMEINFO, 0));
 	m_Collision.SetAxiomQuadRoundStartTick(pQuadGameInfo ? pQuadGameInfo->m_RoundStartTick : 0);
-	auto &&Evolve = [this](CNetObj_Character *pCharacter, int Tick) {
+	auto &&Evolve = [this](CNetObj_Character *pCharacter, int Tick, int ClientId) {
+		Collision()->SetEnvelopeTriggerContext(&m_GameWorld.m_EnvelopeTriggers, ClientId, m_Teams.Team(ClientId), Tick);
 		CWorldCore TempWorld;
 		CCharacterCore TempCore = CCharacterCore();
 		CTeamsCore TempTeams = CTeamsCore();
@@ -2058,9 +2071,9 @@ void CGameClient::OnNewSnapshot(bool DummySwapped)
 						}
 
 						if(EvolvePrev && m_Snap.m_aCharacters[Item.m_Id].m_Prev.m_Tick)
-							Evolve(&m_Snap.m_aCharacters[Item.m_Id].m_Prev, Client()->PrevGameTick(g_Config.m_ClDummy));
+							Evolve(&m_Snap.m_aCharacters[Item.m_Id].m_Prev, Client()->PrevGameTick(g_Config.m_ClDummy), Item.m_Id);
 						if(EvolveCur && m_Snap.m_aCharacters[Item.m_Id].m_Cur.m_Tick)
-							Evolve(&m_Snap.m_aCharacters[Item.m_Id].m_Cur, Client()->GameTick(g_Config.m_ClDummy));
+							Evolve(&m_Snap.m_aCharacters[Item.m_Id].m_Cur, Client()->GameTick(g_Config.m_ClDummy), Item.m_Id);
 
 						m_aClients[Item.m_Id].m_Snapped = *((const CNetObj_Character *)Item.m_pData);
 						m_aClients[Item.m_Id].m_Evolved = m_Snap.m_aCharacters[Item.m_Id].m_Cur;
@@ -5517,8 +5530,56 @@ static bool UnknownMapSettingCallback(const char *pCommand, void *pUser)
 	return true;
 }
 
+void CGameClient::ReadEnvelopeSnapshot()
+{
+	const int Slot = g_Config.m_ClDummy;
+	m_aEnvelopeAuthority[Slot] = false;
+	const int NumItems = Client()->SnapNumItems(IClient::SNAP_CURRENT);
+	for(int i = 0; i < NumItems; ++i)
+	{
+		const IClient::CSnapItem Item = Client()->SnapGetItem(IClient::SNAP_CURRENT, i);
+		const void *pData = Item.m_pData;
+		if(Item.m_Type != NETOBJTYPE_ENVELOPETRIGGERINFO || !pData)
+			continue;
+		const auto *pInfo = static_cast<const CNetObj_EnvelopeTriggerInfo *>(pData);
+		if(pInfo->m_ClientId < 0 || pInfo->m_ClientId >= MAX_CLIENTS || pInfo->m_Team < 0 || pInfo->m_Team >= NUM_DDRACE_TEAMS || pInfo->m_SpawnType < 0 || pInfo->m_SpawnType >= NUM_ENVELOPE_TRIGGERS)
+			continue;
+		m_aEnvelopeAuthority[Slot] = true;
+		m_aEnvelopeViewIds[Slot] = pInfo->m_ClientId;
+		m_aEnvelopeViewTeams[Slot] = pInfo->m_Team;
+		m_GameWorld.m_EnvelopeTriggers.SetClock(pInfo->m_MapStartTick, static_cast<EEnvelopeTriggerType>(pInfo->m_SpawnType));
+		// Every snapshot is a complete current state, including after respawn,
+		// team changes, demo seeks and switching spectator targets.
+		m_GameWorld.m_EnvelopeTriggers.ResetClient(pInfo->m_ClientId);
+		break;
+	}
+	if(!m_aEnvelopeAuthority[Slot])
+		return;
+	for(int i = 0; i < NumItems; ++i)
+	{
+		const IClient::CSnapItem Item = Client()->SnapGetItem(IClient::SNAP_CURRENT, i);
+		const void *pData = Item.m_pData;
+		if(Item.m_Type != NETOBJTYPE_ENVELOPETRIGGER || !pData)
+			continue;
+		const auto *pState = static_cast<const CNetObj_EnvelopeTrigger *>(pData);
+		if(pState->m_ClientId != m_aEnvelopeViewIds[Slot] || pState->m_Type < 0 || pState->m_Type >= NUM_ENVELOPE_TRIGGERS || pState->m_OffsetMillis < 0 || pState->m_StartTick > Client()->GameTick(Slot))
+			continue;
+		m_GameWorld.m_EnvelopeTriggers.SetState(Item.m_Id, pState->m_ClientId, {static_cast<EEnvelopeTriggerType>(pState->m_Type), pState->m_StartTick, pState->m_OffsetMillis});
+	}
+}
+
+double CGameClient::EnvelopeTime(int Envelope, double Tick, double OffsetSeconds) const
+{
+	const int Slot = g_Config.m_ClDummy;
+	const bool Predicted = Client()->State() != IClient::STATE_DEMOPLAYBACK && g_Config.m_ClPredict && !m_Snap.m_SpecInfo.m_Active && m_PredictedWorld.m_EnvelopeTriggers.Enabled();
+	const auto &Triggers = Predicted ? m_PredictedWorld.m_EnvelopeTriggers : m_GameWorld.m_EnvelopeTriggers;
+	return Triggers.Time(Envelope, Tick, OffsetSeconds, m_aEnvelopeViewIds[Slot], m_aEnvelopeViewTeams[Slot]);
+}
+
 void CGameClient::LoadMapSettings()
 {
+	m_GameWorld.m_EnvelopeTriggers.Init(Map(), 0);
+	std::fill(std::begin(m_aEnvelopeAuthority), std::end(m_aEnvelopeAuthority), false);
 	m_MapBugs = CMapBugs::Create(Map()->BaseName(), Map()->Size(), Map()->Sha256());
 
 	// Reset Tunezones
@@ -5584,6 +5645,24 @@ void CGameClient::ConTuneZone(IConsole::IResult *pResult, void *pUserData)
 
 	if(List >= 0 && List < TuneZone::NUM)
 		pSelf->TuningList()[List].Set(pParamName, NewValue);
+}
+
+void CGameClient::ConEnvelopeTrigger(IConsole::IResult *pResult, void *pUserData)
+{
+	auto *pSelf = static_cast<CGameClient *>(pUserData);
+	pSelf->m_GameWorld.m_EnvelopeTriggers.AddTrigger(pResult->GetInteger(0), pResult->GetString(1), pResult->GetInteger(2));
+}
+
+void CGameClient::ConEnvelopeTriggerSpawn(IConsole::IResult *pResult, void *pUserData)
+{
+	auto *pSelf = static_cast<CGameClient *>(pUserData);
+	pSelf->m_GameWorld.m_EnvelopeTriggers.SetSpawn(pResult->GetString(0));
+}
+
+void CGameClient::ConTuneZoneEnvelopeTrigger(IConsole::IResult *pResult, void *pUserData)
+{
+	auto *pSelf = static_cast<CGameClient *>(pUserData);
+	pSelf->m_GameWorld.m_EnvelopeTriggers.SetTuneZone(pResult->GetInteger(0), pResult->GetInteger(1));
 }
 
 void CGameClient::ConMapbug(IConsole::IResult *pResult, void *pUserData)

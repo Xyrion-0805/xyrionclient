@@ -17,6 +17,7 @@ float ModeOffsetTicks(int Mode, int Amount, float Scale)
 
 float BcInputs::EffectiveOffsetTicks()
 {
+	if(g_Config.m_XcPixelMove || g_Config.m_XcTeeBalanceRunning) return 0.0f;
 	switch(g_Config.m_BcInputs)
 	{
 	case BC_INPUTS_FAST: return ModeOffsetTicks(BC_INPUTS_FAST, g_Config.m_TcFastInputAmount, 20.0f);

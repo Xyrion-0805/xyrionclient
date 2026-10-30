@@ -58,6 +58,8 @@ void CPlasma::Reset()
 
 void CPlasma::Tick()
 {
+	Collision()->SetEnvelopeTriggerContext(&GameWorld()->m_EnvelopeTriggers, m_ForClientId, m_ForClientId >= 0 && m_ForClientId < MAX_CLIENTS ? GameWorld()->m_Teams.Team(m_ForClientId) : 0, GameWorld()->GameTick());
+	Collision()->SetAxiomQuadTick(GameWorld()->GameTick(), GameWorld()->GameTickSpeed());
 	// A plasma bullet has only a limited lifetime
 	if(m_LifeTime == 0)
 	{

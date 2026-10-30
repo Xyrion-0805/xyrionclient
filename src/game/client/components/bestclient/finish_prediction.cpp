@@ -26,12 +26,12 @@
 
 namespace
 {
-CUIRect PushHudRectFromMusicPlayer(CGameClient *pGameClient, CUIRect Rect, float HudWidth, float HudHeight, bool ForcePreview)
+CUIRect PushHudRectFromMediaIsland(CGameClient *pGameClient, CUIRect Rect, float HudWidth, float HudHeight, bool ForcePreview)
 {
 	if(ForcePreview || pGameClient == nullptr || Rect.w <= 0.0f || Rect.h <= 0.0f)
 		return Rect;
 
-	const vec2 Offset = pGameClient->m_MusicPlayer.GetHudPushOffsetForRect(Rect, HudWidth, HudHeight, 2.0f);
+	const vec2 Offset = pGameClient->m_Hud.GetMediaIslandPushOffset(Rect, HudWidth, HudHeight, 2.0f);
 	Rect.x += Offset.x;
 	Rect.y += Offset.y;
 	return Rect;
@@ -953,7 +953,7 @@ CUIRect CFinishPrediction::GetRect(bool ForcePreview) const
 	CUIRect Rect = {Layout.m_X, Layout.m_Y, RectWidth, RectHeight};
 	Rect.x = std::clamp(Rect.x, 0.0f, std::max(0.0f, HudWidth - Rect.w));
 	Rect.y = std::clamp(Rect.y, 0.0f, std::max(0.0f, HudHeight - Rect.h));
-	return PushHudRectFromMusicPlayer(GameClient(), Rect, HudWidth, HudHeight, ForcePreview);
+	return PushHudRectFromMediaIsland(GameClient(), Rect, HudWidth, HudHeight, ForcePreview);
 }
 
 void CFinishPrediction::Render(bool ForcePreview)

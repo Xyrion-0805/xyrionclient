@@ -235,6 +235,10 @@ public:
 	IGameController *m_pController;
 	CGameWorld m_World;
 	CPlayerMapping m_PlayerMapping;
+	void SetQuadContext(int ClientId);
+	static void ConEnvelopeTrigger(IConsole::IResult *pResult, void *pUserData);
+	static void ConEnvelopeTriggerSpawn(IConsole::IResult *pResult, void *pUserData);
+	static void ConTuneZoneEnvelopeTrigger(IConsole::IResult *pResult, void *pUserData);
 
 	// helper functions
 	CCharacter *GetPlayerChar(int ClientId);

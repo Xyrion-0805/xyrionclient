@@ -87,6 +87,22 @@ void CMenus::DemoSeekTick(IDemoPlayer::ETickOffset TickOffset)
 
 void CMenus::RenderDemoPlayer(CUIRect MainView)
 {
+	if(GameClient()->m_DemoTimeline.IsOpen())
+	{
+		GameClient()->m_DemoTimeline.Render(MainView);
+		return;
+	}
+	if(IsActive())
+	{
+		CUIRect EditorButton = MainView;
+		EditorButton.x += 12; EditorButton.y += 12; EditorButton.w = 140; EditorButton.h = 28;
+		static CButtonContainer s_EditorButton;
+		if(DoButton_Menu(&s_EditorButton, "剪辑工作台", 0, &EditorButton))
+		{
+			GameClient()->m_DemoTimeline.Toggle();
+			return;
+		}
+	}
 	const IDemoPlayer::CInfo *pInfo = DemoPlayer()->BaseInfo();
 	const int CurrentTick = pInfo->m_CurrentTick - pInfo->m_FirstTick;
 	const int TotalTicks = pInfo->m_LastTick - pInfo->m_FirstTick;

@@ -227,6 +227,8 @@ void CGameWorld::Tick()
 			for(; pEnt;)
 			{
 				m_pNextTraverseEntity = pEnt->m_pNextTypeEntity;
+				if(pEnt->m_ObjType != ENTTYPE_CHARACTER)
+					GameServer()->SetQuadContext(pEnt->GetOwnerId());
 				pEnt->Tick();
 				pEnt = m_pNextTraverseEntity;
 			}
@@ -236,6 +238,8 @@ void CGameWorld::Tick()
 			for(; pEnt;)
 			{
 				m_pNextTraverseEntity = pEnt->m_pNextTypeEntity;
+				if(pEnt->m_ObjType != ENTTYPE_CHARACTER)
+					GameServer()->SetQuadContext(pEnt->GetOwnerId());
 				pEnt->TickDeferred();
 				pEnt = m_pNextTraverseEntity;
 			}

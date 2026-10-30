@@ -64,6 +64,8 @@ void CMenusSettingsControls::OnInterfacesInit(CGameClient *pClient)
 	m_vBindOptions = {
 		{EBindOptionGroup::MOVEMENT, Localizable("Move left"), "+left"},
 		{EBindOptionGroup::MOVEMENT, Localizable("Move right"), "+right"},
+		{EBindOptionGroup::MOVEMENT, Localizable("像素移动开关"), "+pixelmove"},
+		{EBindOptionGroup::MOVEMENT, Localizable("动态平衡开关"), "+teebalance"},
 		{EBindOptionGroup::MOVEMENT, Localizable("Jump"), "+jump"},
 		{EBindOptionGroup::MOVEMENT, Localizable("Fire"), "+fire"},
 		{EBindOptionGroup::MOVEMENT, Localizable("Hook"), "+hook"},

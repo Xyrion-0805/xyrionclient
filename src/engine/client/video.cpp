@@ -1015,6 +1015,8 @@ void CVideo::WriteFrame(COutputStream *pStream, size_t ThreadIndex)
 		if(!RecvResult)
 		{
 			/* rescale output packet timestamp values from codec to stream timebase */
+			if(pStream->m_pCodecContext->codec_type == AVMEDIA_TYPE_VIDEO && pPacket->duration <= 0)
+				pPacket->duration = 1; // one frame in the video codec time base
 			av_packet_rescale_ts(pPacket, pStream->m_pCodecContext->time_base, pStream->m_pStream->time_base);
 			pPacket->stream_index = pStream->m_pStream->index;
 
@@ -1065,6 +1067,8 @@ void CVideo::FinishFrames(COutputStream *pStream)
 		if(!RecvResult)
 		{
 			/* rescale output packet timestamp values from codec to stream timebase */
+			if(pStream->m_pCodecContext->codec_type == AVMEDIA_TYPE_VIDEO && pPacket->duration <= 0)
+				pPacket->duration = 1;
 			av_packet_rescale_ts(pPacket, pStream->m_pCodecContext->time_base, pStream->m_pStream->time_base);
 			pPacket->stream_index = pStream->m_pStream->index;
 

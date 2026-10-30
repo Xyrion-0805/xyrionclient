@@ -288,6 +288,9 @@ MACRO_CONFIG_INT(TcShowhudDummySpeed, tc_showhud_dummy_speed, 0, 0, 1, CFGFLAG_C
 MACRO_CONFIG_INT(TcShowhudDummyAngle, tc_showhud_dummy_angle, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Show ingame HUD (Dummy Aim Angle)")
 
 // Xyrion Client
+MACRO_CONFIG_INT(XcTeeBalance, xc_tee_balance, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Enable lower-tee balance assistance")
+MACRO_CONFIG_INT(XcTeeBalanceRunning, xc_tee_balance_running, 0, 0, 1, CFGFLAG_CLIENT, "Runtime balance input state")
+MACRO_CONFIG_INT(XcPixelMove, xc_pixel_move, 0, 0, 1, CFGFLAG_CLIENT, "Pixel movement mode: a one-tick tap in the pressed direction")
 MACRO_CONFIG_INT(XcSettingsTab, xc_settings_tab, 0, 0, 3, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Xyrion category: 0 gameplay, 1 visuals, 2 mods, 3 Qm features")
 MACRO_CONFIG_INT(XcBrowserX, xc_browser_x, 60, 0, 32768, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Browser window horizontal position")
 MACRO_CONFIG_INT(XcBrowserY, xc_browser_y, 50, 0, 32768, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Browser window vertical position")
@@ -295,10 +298,6 @@ MACRO_CONFIG_INT(XcBrowserW, xc_browser_w, 960, 400, 32768, CFGFLAG_CLIENT | CFG
 MACRO_CONFIG_INT(XcBrowserH, xc_browser_h, 640, 240, 32768, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Browser window height")
 MACRO_CONFIG_STR(XcBrowserUrl, xc_browser_url, 1024, "https://www.bing.com", CFGFLAG_CLIENT | CFGFLAG_SAVE, "Browser last address")
 MACRO_CONFIG_COL(XcGlassColor, xc_glass_color, 255, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Liquid glass tint color")
-MACRO_CONFIG_INT(XcTeeHat, xc_tee_hat, 0, 0, 6, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Local Tee hat: 0 off, 1 cap, 2 top hat, 3 beret, 4 crown, 5 cat ears, 6 bunny ears")
-MACRO_CONFIG_INT(XcTeeGlasses, xc_tee_glasses, 0, 0, 4, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Local Tee glasses: 0 off, 1 sunglasses, 2 round, 3 slim, 4 monocle")
-MACRO_CONFIG_COL(XcTeeHatColor, xc_tee_hat_color, 9943040, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Local Tee hat color")
-MACRO_CONFIG_COL(XcTeeGlassesColor, xc_tee_glasses_color, 32, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Local Tee glasses color")
 MACRO_CONFIG_INT(XcGlobalGlass, xc_global_glass, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Apply yzrt-inspired liquid glass to UI surfaces")
 MACRO_CONFIG_INT(XcGlassOpacity, xc_glass_opacity, 100, 0, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Global liquid glass opacity in percent; colored surfaces retain a stronger fill")
 MACRO_CONFIG_INT(XcCommandHints, xc_command_hints, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Show Chinese slash command hints")
@@ -321,3 +320,7 @@ MACRO_CONFIG_STR(XcVideoPath, xc_video_path, 1024, "", CFGFLAG_CLIENT | CFGFLAG_
 MACRO_CONFIG_INT(XcVideoDim, xc_video_dim, 25, 0, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Darken the menu video by this percentage")
 MACRO_CONFIG_INT(XcModsEnabled, xc_mods_enabled, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Enable the visual block mod runtime")
 MACRO_CONFIG_INT(XcModsHotReload, xc_mods_hot_reload, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Reload saved mod files when they change outside the editor")
+
+#define XYRION_SOUND(Name, Script, Sound, Label, Group) MACRO_CONFIG_INT(Name, Script, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Enable " #Sound)
+#include "xyrion_sound_toggles.h"
+#undef XYRION_SOUND

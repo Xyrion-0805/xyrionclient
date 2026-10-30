@@ -32,6 +32,7 @@ CPlasma::CPlasma(CGameWorld *pGameWorld, vec2 Pos, vec2 Dir, bool Freeze,
 
 void CPlasma::Tick()
 {
+	GameServer()->SetQuadContext(m_ForClientId);
 	// A plasma bullet has only a limited lifetime
 	if(m_LifeTime == 0)
 	{

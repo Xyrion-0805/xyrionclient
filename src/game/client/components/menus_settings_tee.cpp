@@ -26,23 +26,19 @@
 
 void CMenus::RenderSettingsTee(CUIRect MainView)
 {
-	CUIRect TabBar, PlayerTab, DummyTab, ChangeInfo;
-	MainView.HSplitTop(20.0f, &TabBar, &MainView);
+	CUIRect TabBar, ChangeInfo;
+	MainView.HSplitTop(ui_token::settings::SUB_TAB_HEIGHT, &TabBar, &MainView);
 	TabBar.VSplitMid(&TabBar, &ChangeInfo, 20.f);
-	TabBar.VSplitMid(&PlayerTab, &DummyTab);
 	MainView.HSplitTop(10.0f, nullptr, &MainView);
 
-	static CButtonContainer s_PlayerTabButton;
-	if(DoButton_MenuTab(&s_PlayerTabButton, Localize("Player"), !m_Dummy, &PlayerTab, IGraphics::CORNER_L, nullptr, nullptr, nullptr, nullptr, 4.0f))
+	static CButtonContainer s_aPlayerTabs[2];
+	const char *apPlayerTabs[] = {Localize("Player"), Localize("Dummy")};
+	const int NewPlayerTab = DoSegmentedChoiceInternal(s_aPlayerTabs, apPlayerTabs, 2, m_Dummy ? 1 : 0, TabBar, ui_token::radius::PILL, nullptr, 14.0f, nullptr, nullptr, true);
+	if((NewPlayerTab != 0) != m_Dummy)
 	{
-		m_Dummy = false;
-		m_SkinListScrollToSelected = true;
-	}
-
-	static CButtonContainer s_DummyTabButton;
-	if(DoButton_MenuTab(&s_DummyTabButton, Localize("Dummy"), m_Dummy, &DummyTab, IGraphics::CORNER_R, nullptr, nullptr, nullptr, nullptr, 4.0f))
-	{
-		m_Dummy = true;
+		Ui()->ClosePopupMenus();
+		Ui()->SetActiveItem(nullptr);
+		m_Dummy = NewPlayerTab != 0;
 		m_SkinListScrollToSelected = true;
 	}
 

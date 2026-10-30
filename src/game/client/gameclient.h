@@ -40,6 +40,7 @@
 #include "components/controls.h"
 #include "components/countryflags.h"
 #include "components/damageind.h"
+#include "components/demo_timeline.h"
 #include "components/debughud.h"
 #include "components/effects.h"
 #include "components/emoticon.h"
@@ -78,7 +79,7 @@
 #include "components/qmclient/weapon_trajectory.h"
 #include "components/bestclient/cloud_input.h"
 #include "components/bestclient/snap_tap.h"
-#include "components/bestclient/music_player.h"
+#include "components/system_media_controls.h"
 #include "components/bestclient/chat_bubbles.h"
 #include "components/bestclient/ui_animations.h"
 #include "components/tclient/bindchat.h"
@@ -94,6 +95,7 @@
 #include "components/tclient/rainbow.h"
 #include "components/tclient/scripting.h"
 #include "components/tclient/skinprofiles.h"
+#include "components/tclient/tee_balance.h"
 #include "components/tclient/statusbar.h"
 #include "components/tclient/tclient.h"
 #include "components/tclient/trails.h"
@@ -248,12 +250,14 @@ public:
 	CTClient m_TClient;
 	CAiReply m_AiReply;
 	CWebBrowser m_WebBrowser;
+	CDemoTimeline m_DemoTimeline;
 	CRescueSolver m_RescueSolver;
+	CTeeBalance m_TeeBalance;
 	CAspectRatio m_AspectRatio;
 	bool IsRenderingDummyMiniMap() const { return m_RenderingDummyMiniMap; }
 	void SetRenderingDummyMiniMap(bool Rendering) { m_RenderingDummyMiniMap = Rendering; }
 	CFinishPrediction m_FinishPrediction;
-	CMusicPlayer m_MusicPlayer;
+	CSystemMediaControls m_SystemMediaControls;
 	CCloudInput m_CloudInput;
 	CSnapTap m_SnapTap;
 	bool m_ReceivedPreInput = false;
@@ -339,6 +343,9 @@ private:
 
 	static void ConTuneParam(IConsole::IResult *pResult, void *pUserData);
 	static void ConTuneZone(IConsole::IResult *pResult, void *pUserData);
+	static void ConEnvelopeTrigger(IConsole::IResult *pResult, void *pUserData);
+	static void ConEnvelopeTriggerSpawn(IConsole::IResult *pResult, void *pUserData);
+	static void ConTuneZoneEnvelopeTrigger(IConsole::IResult *pResult, void *pUserData);
 	static void ConMapbug(IConsole::IResult *pResult, void *pUserData);
 
 	static void ConchainMenuMap(IConsole::IResult *pResult, void *pUserData, IConsole::FCommandCallback pfnCallback, void *pCallbackUserData);
@@ -782,6 +789,11 @@ public:
 	// DDRace
 
 	int m_aLocalIds[NUM_DUMMIES];
+	bool m_aEnvelopeAuthority[NUM_DUMMIES] = {};
+	int m_aEnvelopeViewIds[NUM_DUMMIES] = {};
+	int m_aEnvelopeViewTeams[NUM_DUMMIES] = {};
+	void ReadEnvelopeSnapshot();
+	double EnvelopeTime(int Envelope, double Tick, double OffsetSeconds) const;
 	CNetObj_PlayerInput m_DummyInput;
 	CNetObj_PlayerInput m_HammerInput;
 	unsigned int m_DummyFire;

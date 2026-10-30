@@ -65,6 +65,13 @@ public:
 		return true;
 	}
 
+	void OnTeamKill(int Team)
+	{
+		if(Team != m_LocalTeam || !IsTrackedTeam(Team, false))
+			return;
+		m_aPlayers = {};
+	}
+
 	int Count(int ClientId) const
 	{
 		return ClientId >= 0 && ClientId < MAX_CLIENTS ? m_aPlayers[ClientId].m_Count : 0;

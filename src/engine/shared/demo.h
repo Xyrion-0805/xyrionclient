@@ -11,6 +11,7 @@
 #include <engine/shared/protocol.h>
 
 #include <functional>
+#include <atomic>
 #include <vector>
 
 typedef std::function<void()> TUpdateIntraTimesFunc;
@@ -121,6 +122,8 @@ private:
 	IOHANDLE m_File;
 	int64_t m_MapOffset;
 	char m_aFilename[IO_MAX_PATH_LENGTH];
+	char m_aSourceFilename[IO_MAX_PATH_LENGTH]{};
+	double m_TimelineTime = -1.0;
 	char m_aErrorMessage[256];
 	std::vector<CKeyFrame> m_vKeyFrames;
 	CMapInfo m_MapInfo;
@@ -194,6 +197,8 @@ public:
 	void GetDemoName(char *pBuffer, size_t BufferSize) const override;
 	bool GetDemoInfo(IStorage *pStorage, IConsole *pConsole, const char *pFilename, int StorageType, CDemoHeader *pDemoHeader, CTimelineMarkers *pTimelineMarkers, CMapInfo *pMapInfo, IOHANDLE *pFile = nullptr, char *pErrorMessage = nullptr, size_t ErrorMessageSize = 0) const override;
 	const char *Filename() const { return m_aFilename; }
+	const char *SourceFilename() const override { return m_aSourceFilename; }
+	void SetTimelineTime(double Seconds) override { m_TimelineTime = Seconds; }
 	const char *ErrorMessage() const override { return m_aErrorMessage; }
 
 	void Update(bool RealTime = true);
@@ -214,6 +219,7 @@ class CDemoEditor : public IDemoEditor
 public:
 	virtual void Init(CSnapshotDelta *pSnapshotDelta, CSnapshotDelta *pSnapshotDeltaSixup, IConsole *pConsole, IStorage *pStorage);
 	bool Slice(const char *pDemo, const char *pDst, int StartTick, int EndTick, DEMOFUNC_FILTER pfnFilter, void *pUser) override;
+	bool SliceWithCancel(const char *pDemo, const char *pDst, int StartTick, int EndTick, DEMOFUNC_FILTER pfnFilter, void *pUser, const std::atomic<bool> *pCancel);
 };
 
 #endif

@@ -36,6 +36,10 @@
 #include <game/client/components/sounds.h>
 #include <game/client/gameclient.h>
 #include <game/client/ui_listbox.h>
+#include <game/client/QmUi/UiButtons.h>
+#include <game/client/QmUi/UiForms.h>
+#include <game/client/QmUi/QmAnimResolve.h>
+#include <game/client/qm_font_icons.h>
 #include <game/localization.h>
 
 #include <algorithm>
@@ -104,34 +108,20 @@ CMenus::CMenus()
 
 int CMenus::DoButton_Toggle(const void *pId, int Checked, const CUIRect *pRect, bool Active, const unsigned Flags)
 {
-	Graphics()->TextureSet(g_pData->m_aImages[IMAGE_GUIBUTTONS].m_Id);
-	Graphics()->QuadsBegin();
-	if(!Active)
-		Graphics()->SetColor(1.0f, 1.0f, 1.0f, 0.5f);
-	Graphics()->SelectSprite(Checked ? SPRITE_GUIBUTTON_ON : SPRITE_GUIBUTTON_OFF);
-	IGraphics::CQuadItem QuadItem(pRect->x, pRect->y, pRect->w, pRect->h);
-	Graphics()->QuadsDrawTL(&QuadItem, 1);
-	if(Ui()->HotItem() == pId && Active)
-	{
-		Graphics()->SelectSprite(SPRITE_GUIBUTTON_HOVER);
-		QuadItem = IGraphics::CQuadItem(pRect->x, pRect->y, pRect->w, pRect->h);
-		Graphics()->QuadsDrawTL(&QuadItem, 1);
-	}
-	Graphics()->QuadsEnd();
-
+	ui_widget::DrawToggle(ui_widget::ControlContext(Ui()), pId, Checked != 0, *pRect, Active);
 	return Active ? Ui()->DoButtonLogic(pId, Checked, pRect, Flags) : 0;
 }
 
 int CMenus::DoButton_Menu(CButtonContainer *pButtonContainer, const char *pText, int Checked, const CUIRect *pRect, const unsigned Flags, const char *pImageName, int Corners, float Rounding, float FontFactor, ColorRGBA Color)
 {
 	CUIRect Text = *pRect;
-
-	if(Checked)
-		Color = ColorRGBA(0.6f, 0.6f, 0.6f, 0.5f);
-	else // TClient, why was this not here? ig they never use "checked" anywhere important
-		Color.a *= Ui()->ButtonColorMul(pButtonContainer);
-
-	pRect->Draw(Color, Corners, Rounding);
+	ui_widget::SButtonSurfaceOptions SurfaceOptions;
+	SurfaceOptions.m_Selected = Checked != 0;
+	SurfaceOptions.m_Corners = Corners;
+	SurfaceOptions.m_Radius = Rounding;
+	if(Color != ColorRGBA(1.0f, 1.0f, 1.0f, 0.5f))
+		SurfaceOptions.m_Color = Color;
+	ui_widget::DrawButtonSurface(ui_widget::ControlContext(Ui()), pButtonContainer, *pRect, SurfaceOptions);
 
 	if(pImageName)
 	{
@@ -162,92 +152,9 @@ int CMenus::DoButton_Menu(CButtonContainer *pButtonContainer, const char *pText,
 
 int CMenus::DoButton_MenuTab(CButtonContainer *pButtonContainer, const char *pText, int Checked, const CUIRect *pRect, int Corners, SUIAnimator *pAnimator, const ColorRGBA *pDefaultColor, const ColorRGBA *pActiveColor, const ColorRGBA *pHoverColor, float EdgeRounding, const CCommunityIcon *pCommunityIcon)
 {
-	const bool MouseInside = Ui()->HotItem() == pButtonContainer;
-	CUIRect Rect = *pRect;
-
-	if(pAnimator != nullptr)
-	{
-		auto Time = time_get_nanoseconds();
-
-		if(pAnimator->m_Time + 100ms < Time)
-		{
-			pAnimator->m_Value = pAnimator->m_Active ? 1 : 0;
-			pAnimator->m_Time = Time;
-		}
-
-		pAnimator->m_Active = Checked || MouseInside;
-
-		if(pAnimator->m_Active)
-			pAnimator->m_Value = std::clamp<float>(pAnimator->m_Value + (Time - pAnimator->m_Time).count() / (double)std::chrono::nanoseconds(100ms).count(), 0, 1);
-		else
-			pAnimator->m_Value = std::clamp<float>(pAnimator->m_Value - (Time - pAnimator->m_Time).count() / (double)std::chrono::nanoseconds(100ms).count(), 0, 1);
-
-		Rect.w += pAnimator->m_Value * pAnimator->m_WOffset;
-		Rect.h += pAnimator->m_Value * pAnimator->m_HOffset;
-		Rect.x += pAnimator->m_Value * pAnimator->m_XOffset;
-		Rect.y += pAnimator->m_Value * pAnimator->m_YOffset;
-
-		pAnimator->m_Time = Time;
-	}
-
-	if(Checked)
-	{
-		ColorRGBA ColorMenuTab = ms_ColorTabbarActive;
-		if(pActiveColor)
-			ColorMenuTab = *pActiveColor;
-
-		Rect.Draw(ColorMenuTab, Corners, EdgeRounding);
-	}
-	else
-	{
-		if(MouseInside)
-		{
-			ColorRGBA HoverColorMenuTab = ms_ColorTabbarHover;
-			if(pHoverColor)
-				HoverColorMenuTab = *pHoverColor;
-
-			Rect.Draw(HoverColorMenuTab, Corners, EdgeRounding);
-		}
-		else
-		{
-			ColorRGBA ColorMenuTab = ms_ColorTabbarInactive;
-			if(pDefaultColor)
-				ColorMenuTab = *pDefaultColor;
-
-			Rect.Draw(ColorMenuTab, Corners, EdgeRounding);
-		}
-	}
-
-	if(pAnimator != nullptr)
-	{
-		if(pAnimator->m_RepositionLabel)
-		{
-			Rect.x += Rect.w - pRect->w + Rect.x - pRect->x;
-			Rect.y += Rect.h - pRect->h + Rect.y - pRect->y;
-		}
-
-		if(!pAnimator->m_ScaleLabel)
-		{
-			Rect.w = pRect->w;
-			Rect.h = pRect->h;
-		}
-	}
-
-	if(pCommunityIcon)
-	{
-		CUIRect CommunityIcon;
-		Rect.Margin(2.0f, &CommunityIcon);
-		m_CommunityIcons.Render(pCommunityIcon, CommunityIcon, true);
-	}
-	else
-	{
-		CUIRect Label;
-		Rect.HMargin(2.0f, &Label);
-		Ui()->DoLabel(&Label, pText, Label.h * CUi::ms_FontmodHeight, TEXTALIGN_MC);
-	}
-
-	return Ui()->DoButtonLogic(pButtonContainer, Checked, pRect, BUTTONFLAG_LEFT);
+	return DoButton_MenuTabInternal(pButtonContainer, pText, EQmIcon::COUNT, nullptr, Checked, pRect, Corners, pAnimator, pDefaultColor, pActiveColor, pHoverColor, EdgeRounding, pCommunityIcon, nullptr, 0.0f, false);
 }
+
 
 int CMenus::DoButton_GridHeader(const void *pId, const char *pText, int Checked, const CUIRect *pRect, int Align)
 {
@@ -282,30 +189,7 @@ int CMenus::DoButton_Favorite(const void *pButtonId, const void *pParentId, bool
 
 int CMenus::DoButton_CheckBox_Common(const void *pId, const char *pText, const char *pBoxText, const CUIRect *pRect, const unsigned Flags)
 {
-	CUIRect Box, Label;
-	pRect->VSplitLeft(pRect->h, &Box, &Label);
-	Label.VSplitLeft(5.0f, nullptr, &Label);
-
-	Box.Margin(2.0f, &Box);
-	Box.Draw(ColorRGBA(1, 1, 1, 0.25f * Ui()->ButtonColorMul(pId)), IGraphics::CORNER_ALL, 3.0f);
-
-	const bool Checkable = *pBoxText == 'X';
-	if(Checkable)
-	{
-		TextRender()->SetRenderFlags(ETextRenderFlags::TEXT_RENDER_FLAG_ONLY_ADVANCE_WIDTH | ETextRenderFlags::TEXT_RENDER_FLAG_NO_X_BEARING | ETextRenderFlags::TEXT_RENDER_FLAG_NO_Y_BEARING | ETextRenderFlags::TEXT_RENDER_FLAG_NO_OVERSIZE | ETextRenderFlags::TEXT_RENDER_FLAG_NO_PIXEL_ALIGNMENT);
-		TextRender()->SetFontPreset(EFontPreset::ICON_FONT);
-		Ui()->DoLabel(&Box, FontIcon::XMARK, Box.h * CUi::ms_FontmodHeight, TEXTALIGN_MC);
-		TextRender()->SetFontPreset(EFontPreset::DEFAULT_FONT);
-	}
-	else
-	{
-		Ui()->DoLabel(&Box, pBoxText, Box.h * CUi::ms_FontmodHeight, TEXTALIGN_MC);
-	}
-
-	TextRender()->SetRenderFlags(0);
-	Ui()->DoLabel(&Label, pText, Box.h * CUi::ms_FontmodHeight, TEXTALIGN_ML);
-
-	return Ui()->DoButtonLogic(pId, 0, pRect, Flags);
+	return DoButton_CheckBox_Common_WithLabelElement(pId, pText, pBoxText, pRect, Flags, nullptr, true, 0.0f);
 }
 
 bool CMenus::DoLine_RadioMenu(CUIRect &View, const char *pLabel, std::vector<CButtonContainer> &vButtonContainers, const std::vector<const char *> &vLabels, const std::vector<int> &vValues, int &Value)
@@ -436,252 +320,184 @@ int CMenus::DoButton_CheckBox_Number(const void *pId, const char *pText, int Che
 
 void CMenus::RenderMenubar(CUIRect Box, IClient::EClientState ClientState)
 {
-	CUIRect Button;
-
+	// 原版 Qm 胶囊导航：先收集槽位、处理选择，再绘制滑块和文字。
+	const bool Online = ClientState == IClient::STATE_ONLINE;
+	const int ActivePage = Online ? m_GamePage : m_MenuPage;
 	int NewPage = -1;
-	int ActivePage = -1;
-	if(ClientState == IClient::STATE_OFFLINE)
-	{
-		ActivePage = m_MenuPage;
-	}
-	else if(ClientState == IClient::STATE_ONLINE)
-	{
-		ActivePage = m_GamePage;
-	}
-	else
-	{
-		dbg_assert_failed("Client state %d is invalid for RenderMenubar", ClientState);
-	}
+	Box.HSplitTop(21.0f, &Box, nullptr);
+	constexpr float IconGap = 6.0f;
+	constexpr float ItemGap = 4.0f;
+	constexpr float ContentScale = 1.10f;
+	const IUiContext Context = TabBarUiContext();
+	const auto Style = SettingsCapsuleTabBarStyle();
+	const unsigned PreviousFlags = TextRender()->GetRenderFlags();
+	const EFontPreset PreviousFont = TextRender()->GetFontPreset();
+	TextRender()->SetRenderFlags(0);
+	TextRender()->SetFontPreset(EFontPreset::DEFAULT_FONT);
 
-	// First render buttons aligned from right side so remaining
-	// width is known when rendering buttons from left side.
-	TextRender()->SetFontPreset(EFontPreset::ICON_FONT);
-	TextRender()->SetRenderFlags(ETextRenderFlags::TEXT_RENDER_FLAG_ONLY_ADVANCE_WIDTH | ETextRenderFlags::TEXT_RENDER_FLAG_NO_X_BEARING | ETextRenderFlags::TEXT_RENDER_FLAG_NO_Y_BEARING | ETextRenderFlags::TEXT_RENDER_FLAG_NO_PIXEL_ALIGNMENT | ETextRenderFlags::TEXT_RENDER_FLAG_NO_OVERSIZE);
-
-	Box.VSplitRight(33.0f, &Box, &Button);
-	static CButtonContainer s_QuitButton;
-	ColorRGBA QuitColor(1, 0, 0, 0.5f);
-	if(DoButton_MenuTab(&s_QuitButton, FontIcon::POWER_OFF, 0, &Button, IGraphics::CORNER_T, &m_aAnimatorsSmallPage[SMALL_TAB_QUIT], nullptr, nullptr, &QuitColor, 10.0f))
+	CUIRect RightSlots[4];
+	static CButtonContainer s_aRightButtons[4];
+	for(int i = 3; i >= 0; --i)
 	{
-		if(GameClient()->Editor()->HasUnsavedData() || (GameClient()->CurrentRaceTime() / 60 >= g_Config.m_ClConfirmQuitTime && g_Config.m_ClConfirmQuitTime >= 0) || m_MenusIngameTouchControls.UnsavedChanges() || GameClient()->m_TouchControls.HasEditingChanges())
-		{
-			m_Popup = POPUP_QUIT;
-		}
-		else
-		{
-			Client()->Quit();
-		}
+		Box.VSplitRight(Box.h, &Box, &RightSlots[i]);
+		Box.VSplitRight(IconGap, &Box, nullptr);
 	}
-	GameClient()->m_Tooltips.DoToolTip(&s_QuitButton, &Button, Localize("Quit"));
-
-	Box.VSplitRight(10.0f, &Box, nullptr);
-	Box.VSplitRight(33.0f, &Box, &Button);
-	static CButtonContainer s_SettingsButton;
-	if(DoButton_MenuTab(&s_SettingsButton, FontIcon::GEAR, ActivePage == PAGE_SETTINGS, &Button, IGraphics::CORNER_T, &m_aAnimatorsSmallPage[SMALL_TAB_SETTINGS]))
-	{
+	const int PressedRight = ui_widget::CapsuleTabBarPressedIndex(Context, RightSlots, 4);
+	if(PressedRight == 0)
+		NewPage = PAGE_DEMOS;
+	else if(PressedRight == 2)
 		NewPage = PAGE_SETTINGS;
-	}
-	GameClient()->m_Tooltips.DoToolTip(&s_SettingsButton, &Button, Localize("Settings"));
 
-	Box.VSplitRight(10.0f, &Box, nullptr);
-	Box.VSplitRight(33.0f, &Box, &Button);
-	static CButtonContainer s_EditorButton;
-	if(DoButton_MenuTab(&s_EditorButton, FontIcon::PEN_TO_SQUARE, 0, &Button, IGraphics::CORNER_T, &m_aAnimatorsSmallPage[SMALL_TAB_EDITOR]))
+	struct SNavigationTab
 	{
-		g_Config.m_ClEditor = 1;
-	}
-	GameClient()->m_Tooltips.DoToolTip(&s_EditorButton, &Button, Localize("Editor"));
-
-	if(ClientState == IClient::STATE_OFFLINE)
+		int m_Page;
+		const char *m_pText;
+		EQmIcon m_Icon;
+		const char *m_pFallback;
+		const CCommunityIcon *m_pCommunity;
+		float m_Width;
+	};
+	std::vector<SNavigationTab> Tabs;
+	std::vector<CUIRect> Slots;
+	bool ShowStart = false;
+	if(!Online)
 	{
-		Box.VSplitRight(10.0f, &Box, nullptr);
-		Box.VSplitRight(33.0f, &Box, &Button);
-		static CButtonContainer s_DemoButton;
-		if(DoButton_MenuTab(&s_DemoButton, FontIcon::CLAPPERBOARD, ActivePage == PAGE_DEMOS, &Button, IGraphics::CORNER_T, &m_aAnimatorsSmallPage[SMALL_TAB_DEMOBUTTON]))
+		const float Width = 58.0f * ContentScale;
+		Tabs = {
+			{-2, Localize("Main menu"), EQmIcon::HOUSE, FontIcons::FONT_ICON_HOUSE, nullptr, Width},
+			{PAGE_INTERNET, Localize("Internet"), EQmIcon::EARTH_AMERICAS, FontIcons::FONT_ICON_EARTH_AMERICAS, nullptr, Width},
+			{PAGE_LAN, Localize("LAN"), EQmIcon::NETWORK_WIRED, FontIcons::FONT_ICON_NETWORK_WIRED, nullptr, Width},
+			{PAGE_FAVORITES, Localize("Favorites"), EQmIcon::STAR, FontIcons::FONT_ICON_STAR, nullptr, Width}};
+		CUIRect Remaining = Box;
+		for(size_t i = 0; i < Tabs.size(); ++i)
 		{
-			NewPage = PAGE_DEMOS;
+			if(i > 0)
+				Remaining.VSplitLeft(ItemGap, nullptr, &Remaining);
+			CUIRect Slot;
+			Remaining.VSplitLeft(Width, &Slot, &Remaining);
+			Slots.push_back(Slot);
 		}
-		GameClient()->m_Tooltips.DoToolTip(&s_DemoButton, &Button, Localize("Demos"));
-		Box.VSplitRight(10.0f, &Box, nullptr);
-
-		Box.VSplitLeft(33.0f, &Button, &Box);
-
-		bool GotNewsOrUpdate = false;
-
-#if defined(CONF_AUTOUPDATE)
-		int State = Updater()->GetCurrentState();
-		bool NeedUpdate = str_comp(Client()->LatestVersion(), "0");
-		if(State == IUpdater::CLEAN && NeedUpdate)
-		{
-			GotNewsOrUpdate = true;
-		}
-#endif
-
-		GotNewsOrUpdate |= (bool)g_Config.m_UiUnreadNews;
-
-		ColorRGBA HomeButtonColorAlert(0, 1, 0, 0.25f);
-		ColorRGBA HomeButtonColorAlertHover(0, 1, 0, 0.5f);
-		ColorRGBA *pHomeButtonColor = nullptr;
-		ColorRGBA *pHomeButtonColorHover = nullptr;
-
-		const char *pHomeScreenButtonLabel = FontIcon::HOUSE;
-		if(GotNewsOrUpdate)
-		{
-			pHomeScreenButtonLabel = FontIcon::NEWSPAPER;
-			pHomeButtonColor = &HomeButtonColorAlert;
-			pHomeButtonColorHover = &HomeButtonColorAlertHover;
-		}
-
-		static CButtonContainer s_StartButton;
-		if(DoButton_MenuTab(&s_StartButton, pHomeScreenButtonLabel, false, &Button, IGraphics::CORNER_T, &m_aAnimatorsSmallPage[SMALL_TAB_HOME], pHomeButtonColor, pHomeButtonColor, pHomeButtonColorHover, 10.0f))
-		{
-			m_ShowStart = true;
-		}
-		GameClient()->m_Tooltips.DoToolTip(&s_StartButton, &Button, Localize("Main menu"));
-
-		const float BrowserButtonWidth = 75.0f;
-		Box.VSplitLeft(10.0f, nullptr, &Box);
-		Box.VSplitLeft(BrowserButtonWidth, &Button, &Box);
-		static CButtonContainer s_InternetButton;
-		if(DoButton_MenuTab(&s_InternetButton, FontIcon::EARTH_AMERICAS, ActivePage == PAGE_INTERNET, &Button, IGraphics::CORNER_T, &m_aAnimatorsBigPage[BIG_TAB_INTERNET]))
-		{
-			NewPage = PAGE_INTERNET;
-		}
-		GameClient()->m_Tooltips.DoToolTip(&s_InternetButton, &Button, Localize("Internet"));
-
-		Box.VSplitLeft(BrowserButtonWidth, &Button, &Box);
-		static CButtonContainer s_LanButton;
-		if(DoButton_MenuTab(&s_LanButton, FontIcon::NETWORK_WIRED, ActivePage == PAGE_LAN, &Button, IGraphics::CORNER_T, &m_aAnimatorsBigPage[BIG_TAB_LAN]))
-		{
-			NewPage = PAGE_LAN;
-		}
-		GameClient()->m_Tooltips.DoToolTip(&s_LanButton, &Button, Localize("LAN"));
-
-		Box.VSplitLeft(BrowserButtonWidth, &Button, &Box);
-		static CButtonContainer s_FavoritesButton;
-		if(DoButton_MenuTab(&s_FavoritesButton, FontIcon::STAR, ActivePage == PAGE_FAVORITES, &Button, IGraphics::CORNER_T, &m_aAnimatorsBigPage[BIG_TAB_FAVORITES]))
-		{
-			NewPage = PAGE_FAVORITES;
-		}
-		GameClient()->m_Tooltips.DoToolTip(&s_FavoritesButton, &Button, Localize("Favorites"));
-
-		const int MaxPage = PAGE_FAVORITES + ServerBrowser()->FavoriteCommunities().size();
-		if(
-			!Ui()->IsPopupOpen() &&
-			CLineInput::GetActiveInput() == nullptr &&
-			(g_Config.m_UiPage >= PAGE_INTERNET && g_Config.m_UiPage <= MaxPage) &&
-			(m_MenuPage >= PAGE_INTERNET && m_MenuPage <= PAGE_FAVORITE_COMMUNITY_5))
-		{
-			if(Input()->KeyPress(KEY_RIGHT))
-			{
-				NewPage = g_Config.m_UiPage + 1;
-				if(NewPage > MaxPage)
-					NewPage = PAGE_INTERNET;
-			}
-			if(Input()->KeyPress(KEY_LEFT))
-			{
-				NewPage = g_Config.m_UiPage - 1;
-				if(NewPage < PAGE_INTERNET)
-					NewPage = MaxPage;
-			}
-		}
-
-		size_t FavoriteCommunityIndex = 0;
-		static CButtonContainer s_aFavoriteCommunityButtons[5];
-		static_assert(std::size(s_aFavoriteCommunityButtons) == (size_t)PAGE_FAVORITE_COMMUNITY_5 - PAGE_FAVORITE_COMMUNITY_1 + 1);
-		static_assert(std::size(s_aFavoriteCommunityButtons) == (size_t)BIT_TAB_FAVORITE_COMMUNITY_5 - BIT_TAB_FAVORITE_COMMUNITY_1 + 1);
-		static_assert(std::size(s_aFavoriteCommunityButtons) == (size_t)IServerBrowser::TYPE_FAVORITE_COMMUNITY_5 - IServerBrowser::TYPE_FAVORITE_COMMUNITY_1 + 1);
+		SUiAnimTransition AppearTransition;
+		AppearTransition.m_DurationSec = 0.18f;
+		AppearTransition.m_Easing = EEasing::EASE_OUT;
+		int CommunityIndex = 0;
 		for(const CCommunity *pCommunity : ServerBrowser()->FavoriteCommunities())
 		{
-			if(Box.w < BrowserButtonWidth)
+			if(CommunityIndex >= 5 || Remaining.w < Width + ItemGap)
 				break;
-			Box.VSplitLeft(BrowserButtonWidth, &Button, &Box);
-			const int Page = PAGE_FAVORITE_COMMUNITY_1 + FavoriteCommunityIndex;
-			if(DoButton_MenuTab(&s_aFavoriteCommunityButtons[FavoriteCommunityIndex], FontIcon::ELLIPSIS, ActivePage == Page, &Button, IGraphics::CORNER_T, &m_aAnimatorsBigPage[BIT_TAB_FAVORITE_COMMUNITY_1 + FavoriteCommunityIndex], nullptr, nullptr, nullptr, 10.0f, m_CommunityIcons.Find(pCommunity->Id())))
-			{
-				NewPage = Page;
-			}
-			GameClient()->m_Tooltips.DoToolTip(&s_aFavoriteCommunityButtons[FavoriteCommunityIndex], &Button, pCommunity->Name());
-
-			++FavoriteCommunityIndex;
-			if(FavoriteCommunityIndex >= std::size(s_aFavoriteCommunityButtons))
-				break;
+			Remaining.VSplitLeft(ItemGap, nullptr, &Remaining);
+			CUIRect Slot;
+			Remaining.VSplitLeft(Width, &Slot, &Remaining);
+			const uint64_t NodeKey = BuildUiAnimNodeKey(str_quickhash("menu_favorite_community_tab_appear"), str_quickhash(pCommunity->Id()));
+			const auto Presence = GameClient()->UiRuntimeV2()->Tree().ResolvePresence(GameClient()->UiRuntimeV2()->AnimRuntime(), NodeKey, true, AppearTransition);
+			const float RevealWidth = std::max(2.0f, Slot.w * std::clamp(Presence.m_Alpha, 0.0f, 1.0f));
+			Slot.x += (Slot.w - RevealWidth) * 0.5f;
+			Slot.w = RevealWidth;
+			Tabs.push_back({PAGE_FAVORITE_COMMUNITY_1 + CommunityIndex++, pCommunity->Name(), EQmIcon::ELLIPSIS, FontIcons::FONT_ICON_ELLIPSIS, m_CommunityIcons.Find(pCommunity->Id()), Width});
+			Slots.push_back(Slot);
 		}
-
-		TextRender()->SetRenderFlags(0);
-		TextRender()->SetFontPreset(EFontPreset::DEFAULT_FONT);
+		if(!Ui()->IsPopupOpen() && !Ui()->RenderOnly() && CLineInput::GetActiveInput() == nullptr)
+		{
+			for(size_t i = 1; i < Tabs.size(); ++i)
+			{
+				if(Tabs[i].m_Page != ActivePage)
+					continue;
+				if(Input()->KeyPress(KEY_RIGHT))
+					NewPage = Tabs[i + 1 < Tabs.size() ? i + 1 : 1].m_Page;
+				else if(Input()->KeyPress(KEY_LEFT))
+					NewPage = Tabs[i > 1 ? i - 1 : Tabs.size() - 1].m_Page;
+				break;
+			}
+		}
 	}
 	else
 	{
-		TextRender()->SetRenderFlags(0);
-		TextRender()->SetFontPreset(EFontPreset::DEFAULT_FONT);
-
-		// online menus
-		Box.VSplitLeft(90.0f, &Button, &Box);
-		static CButtonContainer s_GameButton;
-		if(DoButton_MenuTab(&s_GameButton, Localize("Game"), ActivePage == PAGE_GAME, &Button, IGraphics::CORNER_TL))
-			NewPage = PAGE_GAME;
-
-		Box.VSplitLeft(90.0f, &Button, &Box);
-		static CButtonContainer s_PlayersButton;
-		if(DoButton_MenuTab(&s_PlayersButton, Localize("Players"), ActivePage == PAGE_PLAYERS, &Button, IGraphics::CORNER_NONE))
-			NewPage = PAGE_PLAYERS;
-
-		Box.VSplitLeft(130.0f, &Button, &Box);
-		static CButtonContainer s_ServerInfoButton;
-		if(DoButton_MenuTab(&s_ServerInfoButton, Localize("Server info"), ActivePage == PAGE_SERVER_INFO, &Button, IGraphics::CORNER_NONE))
-			NewPage = PAGE_SERVER_INFO;
-
-		Box.VSplitLeft(90.0f, &Button, &Box);
-		static CButtonContainer s_NetworkButton;
-		if(DoButton_MenuTab(&s_NetworkButton, Localize("Browser"), ActivePage == PAGE_NETWORK, &Button, IGraphics::CORNER_NONE))
-			NewPage = PAGE_NETWORK;
-
+		const bool Compact = Graphics()->ScreenAspect() <= 1.45f || Box.w < 690.0f;
+		Tabs = {
+			{PAGE_GAME, Localize("Game"), EQmIcon::COUNT, nullptr, nullptr, (Compact ? 56.0f : 64.0f) * ContentScale},
+			{PAGE_PLAYERS, Localize("Players"), EQmIcon::COUNT, nullptr, nullptr, (Compact ? 56.0f : 64.0f) * ContentScale},
+			{PAGE_SERVER_INFO, Localize("Server info"), EQmIcon::COUNT, nullptr, nullptr, (Compact ? 94.0f : 104.0f) * ContentScale},
+			{PAGE_NETWORK, Localize("Browser"), EQmIcon::COUNT, nullptr, nullptr, (Compact ? 56.0f : 64.0f) * ContentScale}};
 		if(GameClient()->m_GameInfo.m_Race)
+			Tabs.push_back({PAGE_GHOST, Localize("Ghost"), EQmIcon::COUNT, nullptr, nullptr, (Compact ? 56.0f : 64.0f) * ContentScale});
+		Tabs.push_back({PAGE_CALLVOTE, Localize("Call vote"), EQmIcon::COUNT, nullptr, nullptr, (Compact ? 80.0f : 88.0f) * ContentScale});
+		float RequiredWidth = ItemGap * float(Tabs.size() - 1);
+		for(const auto &Tab : Tabs)
+			RequiredWidth += Tab.m_Width;
+		const float WidthScale = std::min(1.0f, std::max(0.0f, Box.w - ItemGap * float(Tabs.size() - 1)) / std::max(1.0f, RequiredWidth - ItemGap * float(Tabs.size() - 1)));
+		for(size_t i = 0; i < Tabs.size(); ++i)
 		{
-			Box.VSplitLeft(90.0f, &Button, &Box);
-			static CButtonContainer s_GhostButton;
-			if(DoButton_MenuTab(&s_GhostButton, Localize("Ghost"), ActivePage == PAGE_GHOST, &Button, IGraphics::CORNER_NONE))
-				NewPage = PAGE_GHOST;
-		}
-
-		Box.VSplitLeft(100.0f, &Button, &Box);
-		Box.VSplitLeft(4.0f, nullptr, &Box);
-		static CButtonContainer s_CallVoteButton;
-		if(DoButton_MenuTab(&s_CallVoteButton, Localize("Call vote"), ActivePage == PAGE_CALLVOTE, &Button, IGraphics::CORNER_TR))
-		{
-			NewPage = PAGE_CALLVOTE;
-			m_ControlPageOpening = true;
-		}
-
-		if(Box.w >= 10.0f + 33.0f + 10.0f)
-		{
-			TextRender()->SetFontPreset(EFontPreset::ICON_FONT);
-			TextRender()->SetRenderFlags(ETextRenderFlags::TEXT_RENDER_FLAG_ONLY_ADVANCE_WIDTH | ETextRenderFlags::TEXT_RENDER_FLAG_NO_X_BEARING | ETextRenderFlags::TEXT_RENDER_FLAG_NO_Y_BEARING | ETextRenderFlags::TEXT_RENDER_FLAG_NO_PIXEL_ALIGNMENT | ETextRenderFlags::TEXT_RENDER_FLAG_NO_OVERSIZE);
-
-			Box.VSplitRight(10.0f, &Box, nullptr);
-			Box.VSplitRight(33.0f, &Box, &Button);
-			static CButtonContainer s_DemoButton;
-			if(DoButton_MenuTab(&s_DemoButton, FontIcon::CLAPPERBOARD, ActivePage == PAGE_DEMOS, &Button, IGraphics::CORNER_T, &m_aAnimatorsSmallPage[SMALL_TAB_DEMOBUTTON]))
-			{
-				NewPage = PAGE_DEMOS;
-			}
-			GameClient()->m_Tooltips.DoToolTip(&s_DemoButton, &Button, Localize("Demos"));
-			Box.VSplitRight(10.0f, &Box, nullptr);
-
-			TextRender()->SetRenderFlags(0);
-			TextRender()->SetFontPreset(EFontPreset::DEFAULT_FONT);
+			if(i > 0)
+				Box.VSplitLeft(ItemGap, nullptr, &Box);
+			CUIRect Slot;
+			Box.VSplitLeft(Tabs[i].m_Width * WidthScale, &Slot, &Box);
+			Slots.push_back(Slot);
 		}
 	}
-
-	if(NewPage != -1)
+	const int PressedLeft = PressedRight < 0 ? ui_widget::CapsuleTabBarPressedIndex(Context, Slots.data(), (int)Slots.size()) : -1;
+	if(PressedLeft >= 0)
 	{
-		if(ClientState == IClient::STATE_OFFLINE)
+		if(Tabs[PressedLeft].m_Page == -2)
+			ShowStart = true;
+		else
+			NewPage = Tabs[PressedLeft].m_Page;
+	}
+	const int FeedbackPage = NewPage >= 0 ? NewPage : ActivePage;
+	int ActiveTab = -1;
+	for(size_t i = 0; i < Tabs.size(); ++i)
+		if(Tabs[i].m_Page == FeedbackPage)
+			ActiveTab = (int)i;
+	std::vector<ColorRGBA> Tints(Tabs.size(), ColorRGBA(0, 0, 0, 0));
+	if(!Online && g_Config.m_UiUnreadNews)
+		Tints[0] = ColorRGBA(0, 1, 0, 0.25f);
+	ui_widget::CapsuleTabBarChrome(Context, MakeUiScopeHash(Online ? "menubar_capsule_ingame_tabs" : "menubar_capsule_start_tabs"), Slots.data(), (int)Slots.size(), ActiveTab, Style, Tints.data());
+	static CButtonContainer s_aNavigationButtons[10];
+	for(size_t i = 0; i < Tabs.size(); ++i)
+	{
+		const auto &Tab = Tabs[i];
+		DoButton_MenuTabInternal(&s_aNavigationButtons[i], Tab.m_Icon == EQmIcon::COUNT ? Tab.m_pText : nullptr, Tab.m_Icon, Tab.m_pFallback, ActiveTab == (int)i, &Slots[i], IGraphics::CORNER_ALL, nullptr, nullptr, nullptr, nullptr, ui_token::radius::PILL, Tab.m_pCommunity, nullptr, ui_token::settings::TAB_FONT_SIZE * ContentScale, true);
+		GameClient()->m_Tooltips.DoToolTip(&s_aNavigationButtons[i], &Slots[i], Tab.m_pText);
+	}
+	const ColorRGBA MenuSurface = color_cast<ColorRGBA>(ColorHSLA(g_Config.m_QmUiColor)).WithAlpha(std::clamp(g_Config.m_QmUiOpacity / 100.0f, 0.0f, 1.0f));
+	const ColorRGBA QuitDefault(std::max(MenuSurface.r, 0.20f), MenuSurface.g * 0.35f, MenuSurface.b * 0.35f, std::max(MenuSurface.a, 0.32f));
+	const ColorRGBA QuitHover(1.0f, 0.15f, 0.15f, 0.52f);
+	const ColorRGBA RightTints[] = {ColorRGBA(0, 0, 0, 0), ColorRGBA(0, 0, 0, 0), ColorRGBA(0, 0, 0, 0), QuitDefault};
+	const int ActiveRight = FeedbackPage == PAGE_SETTINGS ? 2 : FeedbackPage == PAGE_DEMOS ? 0 : -1;
+	ui_widget::CapsuleTabBarChrome(Context, MakeUiScopeHash("menubar_capsule_right_nav"), RightSlots, 4, ActiveRight, Style, RightTints);
+	const EQmIcon RightIcons[] = {EQmIcon::CLAPPERBOARD, EQmIcon::PEN_TO_SQUARE, EQmIcon::GEAR, EQmIcon::POWER_OFF};
+	const char *apFallbacks[] = {FontIcons::FONT_ICON_CLAPPERBOARD, FontIcons::FONT_ICON_PEN_TO_SQUARE, FontIcons::FONT_ICON_GEAR, FontIcons::FONT_ICON_POWER_OFF};
+	const char *apHints[] = {Localize("Demos"), Localize("Editor"), Localize("Settings"), Localize("Quit")};
+	for(int i = 0; i < 4; ++i)
+	{
+		DoButton_MenuTabInternal(&s_aRightButtons[i], nullptr, RightIcons[i], apFallbacks[i], i == ActiveRight, &RightSlots[i], IGraphics::CORNER_ALL, nullptr, nullptr, nullptr, i == 3 ? &QuitHover : nullptr, ui_token::radius::PILL, nullptr, nullptr, ui_token::settings::TAB_FONT_SIZE * ContentScale, true);
+		GameClient()->m_Tooltips.DoToolTip(&s_aRightButtons[i], &RightSlots[i], apHints[i]);
+	}
+	TextRender()->SetRenderFlags(PreviousFlags);
+	TextRender()->SetFontPreset(PreviousFont);
+	if(ShowStart)
+		m_ShowStart = true;
+	if(NewPage == PAGE_CALLVOTE)
+		m_ControlPageOpening = true;
+	if(PressedRight == 1)
+		g_Config.m_ClEditor = 1;
+	else if(PressedRight == 3)
+	{
+		if(GameClient()->Editor()->HasUnsavedData() || (GameClient()->CurrentRaceTime() / 60 >= g_Config.m_ClConfirmQuitTime && g_Config.m_ClConfirmQuitTime >= 0) || m_MenusIngameTouchControls.UnsavedChanges() || GameClient()->m_TouchControls.HasEditingChanges())
+			m_Popup = POPUP_QUIT;
+		else
+			Client()->Quit();
+	}
+	if(NewPage >= 0)
+	{
+		Ui()->ClosePopupMenus();
+		Ui()->SetActiveItem(nullptr);
+		if(!Online)
 			SetMenuPage(NewPage);
 		else
 			m_GamePage = NewPage;
 	}
 }
+
 
 void CMenus::RenderLoadingDirect(const char *pCaption, const char *pContent, std::optional<float> Progress)
 {
@@ -845,6 +661,7 @@ void CMenus::OnInit()
 
 	Console()->Chain("snd_enable", ConchainUpdateMusicState, this);
 	Console()->Chain("snd_enable_music", ConchainUpdateMusicState, this);
+	Console()->Chain("xc_sound_menu", ConchainUpdateMusicState, this);
 	Console()->Chain("cl_background_entities", ConchainBackgroundEntities, this);
 
 	Console()->Chain("cl_assets_entities", ConchainAssetsEntities, this);
@@ -908,7 +725,7 @@ void CMenus::ConchainUpdateMusicState(IConsole::IResult *pResult, void *pUserDat
 
 void CMenus::UpdateMusicState()
 {
-	const bool ShouldPlay = Client()->State() == IClient::STATE_OFFLINE && g_Config.m_SndEnable && g_Config.m_SndMusic;
+	const bool ShouldPlay = Client()->State() == IClient::STATE_OFFLINE && g_Config.m_SndEnable && g_Config.m_SndMusic && CSounds::IsSoundEnabled(SOUND_MENU);
 	if(ShouldPlay && !GameClient()->m_Sounds.IsPlaying(SOUND_MENU))
 		GameClient()->m_Sounds.Enqueue(CSounds::CHN_MUSIC, SOUND_MENU);
 	else if(!ShouldPlay && GameClient()->m_Sounds.IsPlaying(SOUND_MENU))
@@ -1074,7 +891,7 @@ void CMenus::Render()
 		else
 		{
 			CUIRect TabBar, MainView;
-			Screen.HSplitTop(24.0f, &TabBar, &MainView);
+			Screen.HSplitTop(29.0f, &TabBar, &MainView);
 
 			if(m_MenuPage == PAGE_NEWS)
 			{
@@ -1109,7 +926,7 @@ void CMenus::Render()
 		else
 		{
 			CUIRect TabBar, MainView;
-			Screen.HSplitTop(24.0f, &TabBar, &MainView);
+			Screen.HSplitTop(29.0f, &TabBar, &MainView);
 
 			if(m_GamePage == PAGE_GAME)
 			{
@@ -2318,6 +2135,7 @@ void CMenus::OnShutdown()
 
 bool CMenus::OnCursorMove(float x, float y, IInput::ECursorType CursorType)
 {
+	if(GameClient()->m_DemoTimeline.IsRendering()) return true;
 	if(!m_MenuActive && !GameClient()->m_AspectRatio.ConfirmWantsInput())
 		return false;
 
@@ -2388,6 +2206,8 @@ void CMenus::OnWindowResize()
 
 void CMenus::OnRender()
 {
+	if(!IsSettingsPageActive())
+		m_SettingsCardDisplayState.LeaveSettings();
 	auto &Aspect = GameClient()->m_AspectRatio;
 	Aspect.UpdateConfirm();
 	if(Client()->State() != IClient::STATE_ONLINE && Client()->State() != IClient::STATE_DEMOPLAYBACK)

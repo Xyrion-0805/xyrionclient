@@ -64,6 +64,7 @@ void CGun::Fire()
 	for(int i = 0; i < NumPlayersInRange; i++)
 	{
 		CCharacter *pTarget = static_cast<CCharacter *>(apPlayersInRange[i]);
+		GameServer()->SetQuadContext(pTarget->GetPlayer()->GetCid());
 		const int &TargetTeam = pTarget->Team();
 		// Do not fire at super players
 		if(TargetTeam == TEAM_SUPER)

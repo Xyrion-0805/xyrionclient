@@ -4,6 +4,7 @@
 #define GAME_CLIENT_COMPONENTS_SOUNDS_H
 
 #include <base/vmath.h>
+#include <span>
 
 #include <engine/shared/jobs.h>
 #include <engine/sound.h>
@@ -47,6 +48,17 @@ class CSounds : public CComponent
 	float m_BackgroundMusicVolume = -1.0f;
 
 public:
+	struct SSoundToggle
+	{
+		int *m_pEnabled;
+		int m_Sound;
+		const char *m_pId;
+		const char *m_pLabel;
+		const char *m_pGroup;
+	};
+	static std::span<const SSoundToggle> SoundToggles();
+	static bool IsSoundEnabled(int SetId);
+
 	// sound channels
 	enum
 	{

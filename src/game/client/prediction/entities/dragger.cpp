@@ -42,6 +42,8 @@ void CDragger::LookForPlayersToDrag()
 	for(int i = 0; i < NumPlayersInRange; i++)
 	{
 		CCharacter *pTarget = static_cast<CCharacter *>(apPlayersInRange[i]);
+		Collision()->SetEnvelopeTriggerContext(&GameWorld()->m_EnvelopeTriggers, pTarget->GetCid(), pTarget->Team(), GameWorld()->GameTick());
+		Collision()->SetAxiomQuadTick(GameWorld()->GameTick(), GameWorld()->GameTickSpeed());
 		const int &TargetTeam = pTarget->Team();
 
 		// Do not create a dragger beam for super player
@@ -113,6 +115,8 @@ void CDragger::DraggerBeamTick()
 	}
 
 	// When the dragger can no longer reach the target player, the dragger beam dissolves
+	Collision()->SetEnvelopeTriggerContext(&GameWorld()->m_EnvelopeTriggers, pTarget->GetCid(), pTarget->Team(), GameWorld()->GameTick());
+	Collision()->SetAxiomQuadTick(GameWorld()->GameTick(), GameWorld()->GameTickSpeed());
 	if(distance(pTarget->m_Pos, m_Pos) >= g_Config.m_SvDraggerRange ||
 		(m_IgnoreWalls ?
 				Collision()->IntersectNoLaserNoWalls(m_Pos, pTarget->m_Pos, nullptr, nullptr) :

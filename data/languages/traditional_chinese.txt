@@ -2704,3 +2704,27 @@ Always predict frozen players
 
 No country flags match your filter criteria
 == 
+
+Interface animations
+== 介面動畫
+
+Graphics display
+== 顯示設定
+
+Default width
+== 預設寬度
+
+Full width
+== 全寬
+
+Laser colors
+== 雷射顏色
+
+Laser settings
+== 雷射設定
+
+Reduced
+== 減少
+
+Full
+== 完整

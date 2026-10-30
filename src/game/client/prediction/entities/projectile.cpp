@@ -74,6 +74,8 @@ vec2 CProjectile::GetPos(float Time)
 
 void CProjectile::Tick()
 {
+	Collision()->SetEnvelopeTriggerContext(&GameWorld()->m_EnvelopeTriggers, m_Owner, m_Owner >= 0 && m_Owner < MAX_CLIENTS ? GameWorld()->m_Teams.Team(m_Owner) : 0, GameWorld()->GameTick());
+	Collision()->SetAxiomQuadTick(GameWorld()->GameTick(), GameWorld()->GameTickSpeed());
 	float Pt = (GameWorld()->GameTick() - m_StartTick - 1) / (float)GameWorld()->GameTickSpeed();
 	float Ct = (GameWorld()->GameTick() - m_StartTick) / (float)GameWorld()->GameTickSpeed();
 	vec2 PrevPos = GetPos(Pt);

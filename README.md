@@ -9,12 +9,14 @@
 ## 已接入的功能
 
 - **界面和输入**：Qm 公共控件、动画、控制台设置、聊天命令补全和 Windows 输入法候选栏；Mod 页使用中性卡片和圆角控件。
-- **三个分身**：主号加三个分身，独立连接、快照与输入；支持切换控制、单独断开及复制动作。
-- **游戏辅助显示**：武器弹道、跑图预测、移动 quads 碰撞预测、冻结队友钩救站位与角度提示。
-- **队伍统计**：Gores 落水榜仅在非 0 队伍中记录同队成员。
-- **浏览器和背景**：WebView2 内置浏览器、浏览器顶部游戏控制开关、MP4/H.264 菜单背景。
-- **媒体**：已有灵动岛、Windows 媒体控制、封面与歌词组件；Qm 原版媒体后端仍在适配中。
-- **Mod 和聊天**：可视化积木、条件、变量、循环；可选自动翻译与提及触发的 AI 回复。
+- **三个分身**：主号加三个分身，独立连接、快照与输入；支持切换控制、单独断开。
+- **游戏辅助显示**：武器弹道、跑图进度、移动方块移动水的延迟补偿、冻结队友钩救站位与角度提示。
+- **队伍统计**：Gores 落水次数显示在 Tab 名字前，仅记录非 0 队伍的同队成员，本队 teamkill 后重新统计。
+- **浏览器和背景**：WebView2 内置浏览器、Alt 切换浏览器与游戏操控、MP4/H.264 菜单背景。
+- **独立声音开关**：声音页可分别启停 41 类内置声音，设置自动保存。
+- **媒体**：已用 Qm 原版 HUD 灵动岛替换 BC，包含液态动画、封面切换、歌词和计分板媒体控制；Windows 使用后台 SMTC 桥接，音乐应用专用 Hook 仍在适配中。
+- **Mod 和聊天**：可视化积木；可选自动翻译与提及触发的 AI 回复。
+- **编辑器与服务器**：Quad Slice 矩形裁剪；内附 Xyrion 修改版 `DDNet-Server.exe`，支持 Envelope Trigger 触发 QQuad 的单次、循环、暂停及继续播放，服务端碰撞与客户端动画同步。配置见 [Envelope Trigger 与 QQuad](docs/xyrion/ENVELOPE_QQUAD.md)。
 
 常用开关在“设置 → Xyrion”；Qm 功能有独立分组。具体默认值、使用方式和限制以[功能说明](docs/xyrion/FEATURES.md)为准。
 
@@ -24,7 +26,11 @@
 
 解压完整运行包后启动 `XyrionClient.exe`，保留同目录 DLL、`data` 和 `storage.cfg`。内置浏览器需要安装 Microsoft Edge WebView2 Runtime。客户端沿用 `%APPDATA%\DDNet` 用户配置，不随源码上传个人配置、密钥和游戏数据。
 
+运行包同时包含服务端。在解压目录启动 `DDNet-Server.exe`，可用随附 `autoexec_server.cfg` 配置地图和服务器参数。默认不公开注册；要使用包络触发与 QQuad 物理联动，需要运行这个修改版服务端。配置与示例见 [联动说明](docs/xyrion/ENVELOPE_QQUAD.md)。
+
 ## 获取与构建
+
+Demo 播放器新增“剪辑工作台”，支持多片段裁剪、排序、分割、变速、撤销重做、工程保存，以及 Demo 片段和 MP4 输出。用法见 [Demo 剪辑说明](docs/xyrion/DEMO_EDITOR.md)，参考来源见 [OpenCut](docs/xyrion/OPENCUT_REFERENCE.md)。
 
 ```powershell
 git clone --recurse-submodules https://github.com/Xyrion-0805/xyrionclient.git
@@ -33,7 +39,7 @@ cd xyrionclient
 powershell -ExecutionPolicy Bypass -File scripts/build_xyrion.ps1 -Action Package
 ```
 
-脚本优先使用项目旁 `.build-tools` 中的工具，也支持 PATH 和 `-ToolsDirectory`。详细环境、依赖版本及输出位置见[构建说明](docs/xyrion/BUILDING.md)。构建统一覆盖 `build-xyrion/XyrionClient.exe`，运行包位于 `dist/XyrionClient`。
+脚本优先使用项目旁 `.build-tools` 中的工具，也支持 PATH 和 `-ToolsDirectory`。详细环境、依赖版本及输出位置见[构建说明](docs/xyrion/BUILDING.md)。构建统一覆盖 `build-xyrion` 内的客户端与服务端，运行包位于 `dist/XyrionClient`，同时包含 `XyrionClient.exe` 和 `DDNet-Server.exe`。
 
 仓库提供手动触发的 Windows 构建工作流，产物为 Actions artifact，不会自动创建 Release。上游多平台工作流已归档，本项目尚未宣称完成跨平台构建验收。
 

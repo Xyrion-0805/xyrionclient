@@ -12,6 +12,8 @@
 
 #include <game/client/component.h>
 
+#include <deque>
+
 class CControls : public CComponent
 {
 public:
@@ -53,6 +55,7 @@ public:
 	void OnRender() override;
 	void OnMessage(int MsgType, void *pRawMsg) override;
 	bool OnCursorMove(float x, float y, IInput::ECursorType CursorType) override;
+	bool OnInput(const IInput::CEvent &Event) override;
 	void OnConsoleInit() override;
 	virtual void OnPlayerDeath();
 
@@ -60,8 +63,19 @@ public:
 	void ClampMousePos();
 	void ResetInput(int Dummy);
 	bool CheckNewInput();
+	const char *PixelMoveStatus() const { return m_pPixelStatus; }
 
 private:
+	std::deque<int> m_PixelRequests;
+	int m_PixelClientId = -1, m_PixelConnection = -1;
+	int m_PixelPulseTick = -1, m_PixelPulseDirection = 0;
+	bool m_PixelToggleHeld = false;
+	bool m_aPixelArrowHeld[2] = {};
+	const char *m_pPixelStatus = "待命";
+	void ResetPixelMove();
+	void RequestPixelMove(int Direction);
+	int PixelMoveDirection();
+	static void ConPixelMove(IConsole::IResult *pResult, void *pUserData);
 	static void ConKeyInputState(IConsole::IResult *pResult, void *pUserData);
 	static void ConKeyInputCounter(IConsole::IResult *pResult, void *pUserData);
 	static void ConKeyInputSet(IConsole::IResult *pResult, void *pUserData);

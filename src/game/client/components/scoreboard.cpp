@@ -807,6 +807,15 @@ void CScoreboard::RenderScoreboard(CUIRect Scoreboard, int Team, int CountStart,
 				{
 					str_copy(aBuf, ClientData.m_aName);
 				}
+				const int LocalId = GameClient()->m_Snap.m_LocalClientId;
+				if(g_Config.m_QmGoresDrownBoard && GameClient()->m_TClient.IsGoresDrownBoardMode() &&
+					LocalId >= 0 && LocalId < MAX_CLIENTS &&
+					CQmGoresDrownTracker::IsSameTrackedTeam(GameClient()->m_Teams.Team(LocalId), DDTeam, false))
+				{
+					char aName[sizeof(aBuf)];
+					str_copy(aName, aBuf);
+					str_format(aBuf, sizeof(aBuf), "[%d] %s", GameClient()->m_TClient.GetGoresDrownCount(pInfo->m_ClientId), aName);
+				}
 				ColorRGBA NameColor = TextColor;
 				if(ClientData.m_AuthLevel)
 				{
@@ -921,11 +930,14 @@ void CScoreboard::RenderRecordingNotification(float x)
 
 void CScoreboard::OnRender()
 {
+	if(!IsActive() || !m_MouseUnlocked || GameClient()->m_Menus.IsActive() || GameClient()->m_Chat.IsActive())
+		m_MediaControls.Cancel(*Ui());
 	if(Client()->State() != IClient::STATE_ONLINE && Client()->State() != IClient::STATE_DEMOPLAYBACK)
 		return;
 
 	if(!IsActive())
 	{
+		m_MediaControls.Cancel(*Ui());
 		// lock mouse if scoreboard was opened by being dead or game pause
 		if(m_MouseUnlocked)
 		{
@@ -953,7 +965,9 @@ void CScoreboard::OnRender()
 	const int NumPlayers = Teams ? std::max(aTeamSize[TEAM_RED], aTeamSize[TEAM_BLUE]) : aTeamSize[TEAM_RED];
 
 	const float ScoreboardSmallWidth = 375.0f + 10.0f;
-	const float ScoreboardWidth = !Teams && NumPlayers <= 16 ? ScoreboardSmallWidth : 750.0f;
+	CSystemMediaControls::SState MediaState;
+	const bool HasMedia = GameClient()->m_SystemMediaControls.GetStateSnapshot(MediaState);
+	const float ScoreboardWidth = std::min(!Teams && NumPlayers <= 16 ? ScoreboardSmallWidth : 750.0f, QmScoreboardMediaMaxWidth(Screen.w, HasMedia));
 	const float TitleHeight = 30.0f;
 
 	CUIRect Scoreboard = {(Screen.w - ScoreboardWidth) / 2.0f, 75.0f, ScoreboardWidth, 355.0f + TitleHeight};
@@ -1099,6 +1113,7 @@ void CScoreboard::OnRender()
 		RenderGoals(Goals);
 	}
 	RenderSpectators(Spectators);
+	m_MediaControls.Render(*Ui(), *TextRender(), GameClient()->m_Tooltips, GameClient()->m_SystemMediaControls, Scoreboard, m_MouseUnlocked && !GameClient()->m_Menus.IsActive() && !GameClient()->m_Chat.IsActive(), 1.0f, ColorRGBA(0.05f, 0.05f, 0.05f, 0.8f));
 
 	RenderRecordingNotification((Screen.w / 7) * 4 + 10);
 

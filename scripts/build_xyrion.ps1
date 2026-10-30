@@ -75,7 +75,7 @@ function Restore-PlaybackDlls {
 function Remove-ObsoleteUiAssets([string]$dataDirectory) {
     # Exact obsolete leaves only; preserve user assets and current shaders.
     foreach ($relative in @('shader\liquid_glass.frag', 'shader\liquid_glass.vert',
-        'tclient\music_bridge.ps1', 'tclient\LICENSE-liquid-glass.txt')) {
+        'tclient\music_bridge.ps1', 'tclient\bestclient_media.ps1', 'tclient\LICENSE-liquid-glass.txt')) {
         $obsolete = Join-Path $dataDirectory $relative
         if (Test-Path -LiteralPath $obsolete -PathType Leaf) {
             Remove-Item -LiteralPath $obsolete -Force
@@ -88,8 +88,8 @@ if ($Action -in @('Build', 'Package', 'All')) {
     $playbackRoot = & (Join-Path $PSScriptRoot 'setup_playback.ps1') -ToolsDirectory $tools
     Restore-PlaybackDlls
     try {
-        & $cmake --build $build --target game-client --parallel $Jobs
-        if ($LASTEXITCODE -ne 0) { throw 'Client build failed' }
+        & $cmake --build $build --target game-client game-server --parallel $Jobs
+        if ($LASTEXITCODE -ne 0) { throw 'Client/server build failed' }
     } finally {
         # Regeneration happens inside --build and may replace these DLLs.
         Restore-PlaybackDlls
@@ -98,7 +98,7 @@ if ($Action -in @('Build', 'Package', 'All')) {
     # profiles must use a separate directory and their own storage.cfg.
     Copy-Item -LiteralPath "$root\storage.cfg" -Destination $build -Force
     Copy-Item -LiteralPath "$root\data\tclient\editor_zh.txt" -Destination "$build\data\tclient" -Force
-    Copy-Item -LiteralPath "$root\data\tclient\bestclient_media.ps1" -Destination "$build\data\tclient" -Force
+    Copy-Item -LiteralPath "$root\data\tclient\qm_system_media.ps1" -Destination "$build\data\tclient" -Force
     foreach ($language in @('simplified_chinese.txt', 'traditional_chinese.txt')) {
         Copy-Item -LiteralPath (Join-Path "$root\data\languages" $language) -Destination "$build\data\languages" -Force
     }
@@ -112,7 +112,7 @@ if ($Action -in @('Build', 'Package', 'All')) {
 if ($Action -in @('Test', 'All')) {
     & $cmake --build $build --target testrunner --parallel $Jobs
     if ($LASTEXITCODE -ne 0) { throw 'Test build failed' }
-    & "$build\testrunner.exe" '--gtest_filter=AiReply*:*ModSystem*:*Modsystem*:*Xyrion*:*Axiom*:ServerInfo.*:Qm*:SteamManualPath.*:TextGradientGeometry.*:RenderTargetGeometry.*:DummyMiniView*.*'
+    & "$build\testrunner.exe" '--gtest_filter=AiReply*:*ModSystem*:*Modsystem*:*Xyrion*:*Axiom*:ServerInfo.*:Qm*:SteamManualPath.*:TextGradientGeometry.*:RenderTargetGeometry.*:DummyMiniView*.*:DemoProject.*:QuadCrop.*'
     if ($LASTEXITCODE -ne 0) { throw 'Xyrion tests failed' }
 }
 if ($Action -in @('Package', 'All')) {
@@ -120,6 +120,10 @@ if ($Action -in @('Package', 'All')) {
     $packageData = Join-Path $package 'data'
     New-Item -ItemType Directory -Force -Path $packageData | Out-Null
     Copy-Item -LiteralPath "$build\$ClientExecutable.exe" -Destination (Join-Path $package 'XyrionClient.exe') -Force
+    $serverExecutable = (Select-String -LiteralPath $cachePath -Pattern '^SERVER_EXECUTABLE:STRING=(.+)$').Matches.Groups[1].Value
+    if (!$serverExecutable) { $serverExecutable = 'DDNet-Server' }
+    Copy-Item -LiteralPath (Join-Path $build "$serverExecutable.exe") -Destination (Join-Path $package "$serverExecutable.exe") -Force
+    Copy-Item -LiteralPath (Join-Path $root 'data\autoexec_server.cfg') -Destination (Join-Path $package 'autoexec_server.cfg') -Force
     Get-ChildItem -LiteralPath $build -Filter '*.dll' -File | Copy-Item -Destination $package -Force
     Get-ChildItem -LiteralPath "$build\data" | Copy-Item -Destination $packageData -Recurse -Force
     Remove-ObsoleteUiAssets $packageData

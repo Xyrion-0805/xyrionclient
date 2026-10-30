@@ -4,6 +4,7 @@
 
 #include <base/dbg.h>
 #include <base/mem.h>
+#include <base/str.h>
 #include <base/time.h>
 #include <base/vmath.h>
 
@@ -33,6 +34,9 @@ CControls::CControls()
 
 void CControls::OnReset()
 {
+	ResetPixelMove();
+	m_PixelToggleHeld = false;
+	std::fill(std::begin(m_aPixelArrowHeld), std::end(m_aPixelArrowHeld), false);
 	ResetInput(0);
 	ResetInput(1);
 
@@ -44,6 +48,8 @@ void CControls::OnReset()
 
 void CControls::ResetInput(int Dummy)
 {
+	if(Dummy == g_Config.m_ClDummy)
+		ResetPixelMove();
 	m_aLastData[Dummy].m_Direction = 0;
 	// simulate releasing the fire button
 	if((m_aLastData[Dummy].m_Fire & 1) != 0)
@@ -58,6 +64,8 @@ void CControls::ResetInput(int Dummy)
 
 void CControls::OnPlayerDeath()
 {
+	GameClient()->m_TeeBalance.Stop("角色死亡，已停止");
+	ResetPixelMove();
 	for(int &AmmoCount : m_aAmmoCount)
 		AmmoCount = 0;
 }
@@ -75,7 +83,19 @@ void CControls::ConKeyInputState(IConsole::IResult *pResult, void *pUserData)
 	if(pState->m_pControls->GameClient()->m_GameInfo.m_BugDDRaceInput && pState->m_pControls->GameClient()->m_Snap.m_SpecInfo.m_Active)
 		return;
 
-	*pState->m_apVariables[g_Config.m_ClDummy] = pResult->GetInteger(0);
+	CControls *pControls = pState->m_pControls;
+	int *pVariable = pState->m_apVariables[g_Config.m_ClDummy];
+	const int Value = pResult->GetInteger(0);
+	if(Value && pControls->GameClient()->m_TeeBalance.Active())
+		pControls->GameClient()->m_TeeBalance.Stop("手动输入，已停止");
+	if(g_Config.m_XcPixelMove && Value && !*pVariable)
+	{
+		if(pVariable == &pControls->m_aInputDirectionLeft[g_Config.m_ClDummy])
+			pControls->RequestPixelMove(-1);
+		else if(pVariable == &pControls->m_aInputDirectionRight[g_Config.m_ClDummy])
+			pControls->RequestPixelMove(1);
+	}
+	*pVariable = Value;
 }
 
 void CControls::ConKeyInputCounter(IConsole::IResult *pResult, void *pUserData)
@@ -86,6 +106,8 @@ void CControls::ConKeyInputCounter(IConsole::IResult *pResult, void *pUserData)
 		return;
 
 	int *pVariable = pState->m_apVariables[g_Config.m_ClDummy];
+	if(pResult->GetInteger(0) && pState->m_pControls->GameClient()->m_TeeBalance.Active())
+		pState->m_pControls->GameClient()->m_TeeBalance.Stop("手动输入，已停止");
 	if(((*pVariable) & 1) != pResult->GetInteger(0))
 		(*pVariable)++;
 	*pVariable &= INPUT_STATE_MASK;
@@ -116,6 +138,7 @@ void CControls::ConKeyInputNextPrevWeapon(IConsole::IResult *pResult, void *pUse
 
 void CControls::OnConsoleInit()
 {
+	Console()->Register("+pixelmove", "", CFGFLAG_CLIENT, ConPixelMove, this, "Toggle pixel movement mode once per key press");
 	{
 		static CInputState s_State = {this, {&m_aShowWeaponTrajectory[0], &m_aShowWeaponTrajectory[1]}};
 		Console()->Register("+showweapontrajectory", "", CFGFLAG_CLIENT, ConKeyInputState, &s_State, "Show weapon trajectory guide");
@@ -288,8 +311,12 @@ int CControls::SnapInput(int *pData)
 			m_aInputData[g_Config.m_ClDummy].m_TargetX = 1;
 
 		// set direction
-		m_aInputData[g_Config.m_ClDummy].m_Direction = GameClient()->m_SnapTap.ResolveMovementDirection(g_Config.m_ClDummy,
-			m_aInputDirectionLeft[g_Config.m_ClDummy] != 0, m_aInputDirectionRight[g_Config.m_ClDummy] != 0, true);
+		m_aInputData[g_Config.m_ClDummy].m_Direction = g_Config.m_XcPixelMove ? PixelMoveDirection() :
+			GameClient()->m_SnapTap.ResolveMovementDirection(g_Config.m_ClDummy,
+				m_aInputDirectionLeft[g_Config.m_ClDummy] != 0, m_aInputDirectionRight[g_Config.m_ClDummy] != 0, true);
+
+		// Apply the balance input before optional copying to another connection.
+		GameClient()->m_TeeBalance.ApplyInput(m_aInputData[g_Config.m_ClDummy]);
 
 		// dummy copy moves
 		if(g_Config.m_ClDummyCopyMoves)
@@ -354,6 +381,7 @@ int CControls::SnapInput(int *pData)
 		Send = Send || m_aInputData[g_Config.m_ClDummy].m_WantedWeapon != m_aLastData[g_Config.m_ClDummy].m_WantedWeapon;
 		Send = Send || m_aInputData[g_Config.m_ClDummy].m_NextWeapon != m_aLastData[g_Config.m_ClDummy].m_NextWeapon;
 		Send = Send || m_aInputData[g_Config.m_ClDummy].m_PrevWeapon != m_aLastData[g_Config.m_ClDummy].m_PrevWeapon;
+		Send = Send || g_Config.m_XcPixelMove; // send both the one-tick press and its release
 		Send = Send || time_get() > m_LastSendTime + time_freq() / 25; // send at least 25 Hz
 		Send = Send || (GameClient()->m_Snap.m_pLocalCharacter && GameClient()->m_Snap.m_pLocalCharacter->m_Weapon == WEAPON_NINJA && (m_aInputData[g_Config.m_ClDummy].m_Direction || m_aInputData[g_Config.m_ClDummy].m_Jump || m_aInputData[g_Config.m_ClDummy].m_Hook));
 	}
@@ -371,6 +399,20 @@ int CControls::SnapInput(int *pData)
 
 void CControls::OnRender()
 {
+	for(int Arrow = 0; Arrow < 2; ++Arrow)
+		if(!Input()->KeyIsPressed(Arrow == 0 ? KEY_LEFT : KEY_RIGHT)) m_aPixelArrowHeld[Arrow] = false;
+	if(m_PixelToggleHeld)
+	{
+		bool Held = false;
+		for(int Key = 1; Key < KEY_LAST && !Held; ++Key)
+			if(Input()->KeyIsPressed(Key))
+				for(int Modifier = 0; Modifier < KeyModifier::COMBINATION_COUNT && !Held; ++Modifier)
+					Held = str_find(GameClient()->m_Binds.Get(Key, Modifier), "+pixelmove") != nullptr;
+		if(!Held) m_PixelToggleHeld = false;
+	}
+	if(!g_Config.m_XcPixelMove || Client()->State() != IClient::STATE_ONLINE ||
+		GameClient()->m_Menus.IsActive() || GameClient()->m_Chat.IsActive() || GameClient()->m_GameConsole.IsActive())
+		ResetPixelMove();
 	if(Client()->State() != IClient::STATE_ONLINE && Client()->State() != IClient::STATE_DEMOPLAYBACK)
 		return;
 
@@ -518,8 +560,9 @@ bool CControls::CheckNewInput()
 	if(g_Config.m_BcInputs == BC_INPUTS_SAIKO && g_Config.m_BcSaikoInputAmount > 0)
 	{
 		CNetObj_PlayerInput TestInput = m_aInputData[g_Config.m_ClDummy];
-		TestInput.m_Direction = GameClient()->m_SnapTap.ResolveMovementDirection(g_Config.m_ClDummy,
-			m_aInputDirectionLeft[g_Config.m_ClDummy] != 0, m_aInputDirectionRight[g_Config.m_ClDummy] != 0, false);
+		if(!g_Config.m_XcPixelMove && !g_Config.m_XcTeeBalanceRunning)
+			TestInput.m_Direction = GameClient()->m_SnapTap.ResolveMovementDirection(g_Config.m_ClDummy,
+				m_aInputDirectionLeft[g_Config.m_ClDummy] != 0, m_aInputDirectionRight[g_Config.m_ClDummy] != 0, false);
 		bool NewInput = false;
 		if(m_aFastInput[g_Config.m_ClDummy].m_Direction != TestInput.m_Direction ||
 			m_aFastInput[g_Config.m_ClDummy].m_Hook != TestInput.m_Hook ||
@@ -542,7 +585,7 @@ bool CControls::CheckNewInput()
 	for(int Dummy = 0; Dummy < NUM_DUMMIES; Dummy++)
 	{
 		CNetObj_PlayerInput TestInput = m_aInputData[Dummy];
-		if(Dummy == g_Config.m_ClDummy)
+		if(Dummy == g_Config.m_ClDummy && !g_Config.m_XcPixelMove && !g_Config.m_XcTeeBalanceRunning)
 		{
 			TestInput.m_Direction = GameClient()->m_SnapTap.ResolveMovementDirection(Dummy,
 				m_aInputDirectionLeft[Dummy] != 0, m_aInputDirectionRight[Dummy] != 0, false);

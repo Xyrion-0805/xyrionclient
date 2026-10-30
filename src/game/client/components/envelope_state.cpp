@@ -74,5 +74,12 @@ void CEnvelopeState::EnvelopeEval(int TimeOffsetMillis, int EnvelopeIndex, Color
 		}
 	}
 
-	CRenderMap::RenderEvalEnvelope(m_pEnvelopePoints.get(), Time + milliseconds(TimeOffsetMillis), Result, Channels);
+	if(m_OnlineOnly && GameClient()->m_aEnvelopeAuthority[g_Config.m_ClDummy] && GameClient()->m_Snap.m_pGameInfoObj)
+	{
+		const double Tick = duration<double>(Time).count() * Client()->GameTickSpeed() + GameClient()->m_Snap.m_pGameInfoObj->m_RoundStartTick;
+		Time = duration_cast<nanoseconds>(duration<double>(GameClient()->EnvelopeTime(EnvelopeIndex, Tick, TimeOffsetMillis / 1000.0)));
+		CRenderMap::RenderEvalEnvelope(m_pEnvelopePoints.get(), Time, Result, Channels);
+	}
+	else
+		CRenderMap::RenderEvalEnvelope(m_pEnvelopePoints.get(), Time + milliseconds(TimeOffsetMillis), Result, Channels);
 }

@@ -53,60 +53,10 @@ void CMenus::RenderSettingsGraphics(CUIRect MainView)
 		s_InitDisplayAllVideoModes = g_Config.m_GfxDisplayAllVideoModes;
 	}
 
-	CUIRect ModeList, ModeLabel;
-	MainView.VSplitLeft(350.0f, &MainView, &ModeList);
-	ModeList.HSplitTop(24.0f, &ModeLabel, &ModeList);
-	MainView.VSplitLeft(340.0f, &MainView, nullptr);
-
-	// display mode list
-	static CListBox s_ListBox;
-	static const float sc_RowHeightResList = 22.0f;
-	static const float sc_FontSizeResListHeader = 12.0f;
-	static const float sc_FontSizeResList = 10.0f;
-
-	{
-		int G = std::gcd(g_Config.m_GfxScreenWidth, g_Config.m_GfxScreenHeight);
-		str_format(aBuf, sizeof(aBuf), "%s: %dx%d @%dhz (%d:%d)",
-			Localize("Current"),
-			(int)(g_Config.m_GfxScreenWidth * Graphics()->ScreenHiDPIScale()),
-			(int)(g_Config.m_GfxScreenHeight * Graphics()->ScreenHiDPIScale()),
-			g_Config.m_GfxScreenRefreshRate,
-			g_Config.m_GfxScreenWidth / G,
-			g_Config.m_GfxScreenHeight / G);
-		Ui()->DoLabel(&ModeLabel, aBuf, sc_FontSizeResListHeader, TEXTALIGN_MC);
-	}
-
-	int OldSelected = -1;
-	s_ListBox.SetActive(!Ui()->IsPopupOpen());
-	s_ListBox.DoStart(sc_RowHeightResList, s_NumNodes, 1, 3, OldSelected, &ModeList);
-
-	for(int i = 0; i < s_NumNodes; ++i)
-	{
-		if(g_Config.m_GfxScreenWidth == s_aModes[i].m_WindowWidth &&
-			g_Config.m_GfxScreenHeight == s_aModes[i].m_WindowHeight &&
-			g_Config.m_GfxScreenRefreshRate == s_aModes[i].m_RefreshRate)
-		{
-			OldSelected = i;
-		}
-
-		const CListboxItem Item = s_ListBox.DoNextItem(&s_aModes[i], OldSelected == i);
-		if(!Item.m_Visible)
-			continue;
-
-		int G = std::gcd(s_aModes[i].m_WindowWidth, s_aModes[i].m_WindowHeight);
-		str_format(aBuf, sizeof(aBuf), " %dx%d @%dhz (%d:%d)", s_aModes[i].m_CanvasWidth, s_aModes[i].m_CanvasHeight, s_aModes[i].m_RefreshRate, s_aModes[i].m_WindowWidth / G, s_aModes[i].m_WindowHeight / G);
-		Ui()->DoLabel(&Item.m_Rect, aBuf, sc_FontSizeResList, TEXTALIGN_ML);
-	}
-
-	const int NewSelected = s_ListBox.DoEnd();
-	if(OldSelected != NewSelected)
-	{
-		g_Config.m_GfxScreenWidth = s_aModes[NewSelected].m_WindowWidth;
-		g_Config.m_GfxScreenHeight = s_aModes[NewSelected].m_WindowHeight;
-		g_Config.m_GfxScreenRefreshRate = s_aModes[NewSelected].m_RefreshRate;
-		Graphics()->ResizeToScreen();
-	}
-
+	const auto Metrics = ResolveSettingsContentMetrics(MainView.w);
+	std::vector<SSettingsCardDefinition> Cards;
+	Cards.push_back(SettingsCardDefinition("deck:graphics-display", Localize("Graphics display"), 300.0f, [&](CUIRect &Content) {
+	CUIRect MainView = Content;
 	// switches
 	CUIRect WindowModeDropDown;
 	MainView.HSplitTop(20.0f, &WindowModeDropDown, &MainView);
@@ -208,25 +158,6 @@ void CMenus::RenderSettingsGraphics(CUIRect MainView)
 			CheckSettings = true;
 		}
 	}
-
-	MainView.HSplitTop(20.0f, &Button, &MainView);
-	if(DoButton_CheckBox(&g_Config.m_GfxHighDetail, Localize("High Detail"), g_Config.m_GfxHighDetail, &Button))
-		g_Config.m_GfxHighDetail ^= 1;
-	GameClient()->m_Tooltips.DoToolTip(&g_Config.m_GfxHighDetail, &Button, Localize("Allows maps to render with more detail"));
-
-	MainView.HSplitTop(20.0f, &Button, &MainView);
-	if(DoButton_CheckBox(&g_Config.m_ClShowfps, Localize("Show FPS"), g_Config.m_ClShowfps, &Button))
-		g_Config.m_ClShowfps ^= 1;
-	GameClient()->m_Tooltips.DoToolTip(&g_Config.m_ClShowfps, &Button, Localize("Renders your frame rate in the top right"));
-
-	MainView.HSplitTop(20.0f, &Button, &MainView);
-	str_copy(aBuf, " ");
-	str_append(aBuf, Localize("Hz", "Hertz"));
-	Ui()->DoScrollbarOption(&g_Config.m_GfxRefreshRate, &g_Config.m_GfxRefreshRate, &Button, Localize("Refresh Rate"), 10, 1000, &CUi::ms_LinearScrollbarScale, CUi::SCROLLBAR_OPTION_INFINITE | CUi::SCROLLBAR_OPTION_NOCLAMPVALUE | CUi::SCROLLBAR_OPTION_DELAYUPDATE, aBuf);
-
-	MainView.HSplitTop(2.0f, nullptr, &MainView);
-	static CButtonContainer s_UiColorResetId;
-	DoLine_ColorPicker(&s_UiColorResetId, 25.0f, 13.0f, 2.0f, &MainView, Localize("UI Color"), &g_Config.m_UiColor, color_cast<ColorRGBA>(ColorHSLA(0xE4A046AFU, true)), false, nullptr, true);
 
 	// Backend list
 	struct SMenuBackendInfo
@@ -404,6 +335,108 @@ void CMenus::RenderSettingsGraphics(CUIRect MainView)
 		}
 	}
 
+
+	Content = MainView;
+	}));
+	Cards.push_back(SettingsCardDefinition("deck:graphics-visual", Localize("Visual"), 110.0f, [&](CUIRect &Content) {
+	CUIRect MainView = Content;
+	MainView.HSplitTop(20.0f, &Button, &MainView);
+	if(DoButton_CheckBox(&g_Config.m_GfxHighDetail, Localize("High Detail"), g_Config.m_GfxHighDetail, &Button))
+		g_Config.m_GfxHighDetail ^= 1;
+	GameClient()->m_Tooltips.DoToolTip(&g_Config.m_GfxHighDetail, &Button, Localize("Allows maps to render with more detail"));
+
+	MainView.HSplitTop(20.0f, &Button, &MainView);
+	if(DoButton_CheckBox(&g_Config.m_ClShowfps, Localize("Show FPS"), g_Config.m_ClShowfps, &Button))
+		g_Config.m_ClShowfps ^= 1;
+	GameClient()->m_Tooltips.DoToolTip(&g_Config.m_ClShowfps, &Button, Localize("Renders your frame rate in the top right"));
+
+	MainView.HSplitTop(20.0f, &Button, &MainView);
+	str_copy(aBuf, " ");
+	str_append(aBuf, Localize("Hz", "Hertz"));
+	Ui()->DoScrollbarOption(&g_Config.m_GfxRefreshRate, &g_Config.m_GfxRefreshRate, &Button, Localize("Refresh Rate"), 10, 1000, &CUi::ms_LinearScrollbarScale, CUi::SCROLLBAR_OPTION_INFINITE | CUi::SCROLLBAR_OPTION_NOCLAMPVALUE | CUi::SCROLLBAR_OPTION_DELAYUPDATE, aBuf);
+
+	MainView.HSplitTop(2.0f, nullptr, &MainView);
+	static CButtonContainer s_UiColorResetId;
+	DoLine_ColorPicker(&s_UiColorResetId, 25.0f, 13.0f, 2.0f, &MainView, Localize("UI Color"), &g_Config.m_UiColor, color_cast<ColorRGBA>(ColorHSLA(0xE4A046AFU, true)), false, nullptr, true);
+
+
+	Content = MainView;
+	}));
+	Cards.push_back(SettingsCardDefinition("deck:graphics-modes", Localize("Display modes"), 300.0f, [&](CUIRect &Content) {
+	CUIRect MainView = Content;
+	CUIRect ModeList = MainView, ModeLabel;
+	MainView.HSplitTop(24.0f, &ModeLabel, &ModeList);
+	// display mode list
+	static CListBox s_ListBox;
+	static const float sc_RowHeightResList = 22.0f;
+	static const float sc_FontSizeResListHeader = 12.0f;
+	static const float sc_FontSizeResList = 10.0f;
+
+	{
+		int G = std::gcd(g_Config.m_GfxScreenWidth, g_Config.m_GfxScreenHeight);
+		str_format(aBuf, sizeof(aBuf), "%s: %dx%d @%dhz (%d:%d)",
+			Localize("Current"),
+			(int)(g_Config.m_GfxScreenWidth * Graphics()->ScreenHiDPIScale()),
+			(int)(g_Config.m_GfxScreenHeight * Graphics()->ScreenHiDPIScale()),
+			g_Config.m_GfxScreenRefreshRate,
+			g_Config.m_GfxScreenWidth / G,
+			g_Config.m_GfxScreenHeight / G);
+		Ui()->DoLabel(&ModeLabel, aBuf, sc_FontSizeResListHeader, TEXTALIGN_MC);
+	}
+
+	int OldSelected = -1;
+	s_ListBox.SetActive(!Ui()->IsPopupOpen());
+	s_ListBox.DoStart(sc_RowHeightResList, s_NumNodes, 1, 3, OldSelected, &ModeList);
+
+	for(int i = 0; i < s_NumNodes; ++i)
+	{
+		if(g_Config.m_GfxScreenWidth == s_aModes[i].m_WindowWidth &&
+			g_Config.m_GfxScreenHeight == s_aModes[i].m_WindowHeight &&
+			g_Config.m_GfxScreenRefreshRate == s_aModes[i].m_RefreshRate)
+		{
+			OldSelected = i;
+		}
+
+		const CListboxItem Item = s_ListBox.DoNextItem(&s_aModes[i], OldSelected == i);
+		if(!Item.m_Visible)
+			continue;
+
+		int G = std::gcd(s_aModes[i].m_WindowWidth, s_aModes[i].m_WindowHeight);
+		str_format(aBuf, sizeof(aBuf), " %dx%d @%dhz (%d:%d)", s_aModes[i].m_CanvasWidth, s_aModes[i].m_CanvasHeight, s_aModes[i].m_RefreshRate, s_aModes[i].m_WindowWidth / G, s_aModes[i].m_WindowHeight / G);
+		Ui()->DoLabel(&Item.m_Rect, aBuf, sc_FontSizeResList, TEXTALIGN_ML);
+	}
+
+	const int NewSelected = s_ListBox.DoEnd();
+	if(OldSelected != NewSelected && NewSelected >= 0 && NewSelected < s_NumNodes)
+	{
+		g_Config.m_GfxScreenWidth = s_aModes[NewSelected].m_WindowWidth;
+		g_Config.m_GfxScreenHeight = s_aModes[NewSelected].m_WindowHeight;
+		g_Config.m_GfxScreenRefreshRate = s_aModes[NewSelected].m_RefreshRate;
+		Graphics()->ResizeToScreen();
+	}
+
+
+	Content.y += 300.0f;
+	Content.h = std::max(0.0f, Content.h - 300.0f);
+	}));
+	Cards.push_back(SettingsCardDefinition("deck:graphics-interaction", Localize("Interface animations"), 160.0f, [&](CUIRect &Content) {
+		CUIRect Row;
+		Content.HSplitTop(Metrics.m_LineHeight, &Row, &Content);
+		Content.HSplitTop(Metrics.m_LineSpacing, nullptr, &Content);
+		static CButtonContainer s_aMotionButtons[3];
+		const char *apModes[] = {Localize("Off"), Localize("Reduced"), Localize("Full")};
+		g_Config.m_QmUiMotionLevel = DoSegmentedChoice(s_aMotionButtons, apModes, 3, g_Config.m_QmUiMotionLevel, Row, ui_token::radius::PILL, nullptr, Metrics.m_BodySize);
+		int *apValues[] = {&g_Config.m_QmUiListEntryAnimations, &g_Config.m_QmUiCardHeightAnimations, &g_Config.m_QmUiCardReflowAnimations, &g_Config.m_QmTooltipAnimation};
+		const char *apLabels[] = {"列表与卡片入场动画", "卡片展开与折叠动画", "卡片拖动与重排动画", "提示气泡动画"};
+		for(int i = 0; i < 4; ++i)
+		{
+			Content.HSplitTop(Metrics.m_LineHeight, &Row, &Content);
+			Content.HSplitTop(Metrics.m_LineSpacing, nullptr, &Content);
+			if(DoButton_CheckBox(apValues[i], apLabels[i], *apValues[i], &Row, Metrics.m_BodySize))
+				*apValues[i] ^= 1;
+		}
+	}));
+	RenderSettingsCardPage(MainView, "graphics", Cards);
 	// check if the new settings require a restart
 	if(CheckSettings)
 	{

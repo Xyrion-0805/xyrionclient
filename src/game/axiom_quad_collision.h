@@ -12,6 +12,7 @@
 #include <vector>
 
 class CLayers;
+class CEnvelopeTriggerRuntime;
 
 // Owned by an explicitly enabled client CCollision. No global config or clock
 // is read here: prediction can rewind and replay this object deterministically.
@@ -19,7 +20,7 @@ class CAxiomQuadCollision
 {
 public:
 	void Init(CLayers *pLayers);
-	void SetTime(double Seconds);
+	void SetTime(double Seconds, const CEnvelopeTriggerRuntime *pTriggers = nullptr, int ClientId = -1, int Team = 0, double Tick = 0);
 	int TileAt(vec2 Pos, bool SolidOnly = false) const;
 	bool HasTile(vec2 Pos, int Tile) const;
 	std::vector<int> TilesAt(vec2 Pos) const;
@@ -69,6 +70,7 @@ private:
 		int m_Channels;
 		bool m_Animated;
 		std::array<float, 4> m_aValues;
+		double m_LastTime = -1e100;
 	};
 	void LoadEnvelopes(CLayers *pLayers);
 	void EvalEnvelope(int Index, double Seconds, float *pValues, int Channels) const;
@@ -87,6 +89,9 @@ private:
 	std::unordered_map<uint64_t, std::vector<int>> m_Grid;
 	std::vector<int> m_vLargeQuads;
 	double m_Time = -1;
+	const CEnvelopeTriggerRuntime *m_pTriggers = nullptr;
+	int m_ClientId = -1, m_Team = 0;
+	double m_TriggerTick = -1;
 };
 
 #endif

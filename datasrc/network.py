@@ -400,6 +400,21 @@ Objects = [
 			NetIntRange("m_MapBestTimeMillis", 0, 999),
 	]),
 
+	# PR #11398 base object; optional saved position supports authoritative resume.
+	NetObjectEx("EnvelopeTrigger", "envelope-trigger@netobj.ddnet.org", [
+		NetTick("m_StartTick"),
+		NetIntAny("m_Type"),
+		NetIntRange("m_ClientId", -1, 'MAX_CLIENTS-1'),
+		NetIntAny("m_Flags", default=0),
+		NetIntAny("m_OffsetMillis", default=0),
+	]),
+	NetObjectEx("EnvelopeTriggerInfo", "envelope-trigger-info@netobj.xyrionclient.org", [
+		NetTick("m_MapStartTick"),
+		NetIntRange("m_SpawnType", 0, 6),
+		NetIntRange("m_ClientId", 0, 'MAX_CLIENTS-1'),
+		NetIntAny("m_Team"),
+	]),
+
 	NetEventEx("MapSoundWorld:Common", "map-sound-world@netevent.ddnet.org", [
 		NetIntAny("m_SoundId"),
 	]),

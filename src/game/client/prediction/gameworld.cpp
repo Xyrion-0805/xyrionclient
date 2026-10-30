@@ -35,6 +35,7 @@ CGameWorld::CGameWorld()
 		pCharacter = nullptr;
 	m_pCollision = nullptr;
 	m_GameTick = 0;
+	m_LocalClientId = -1;
 	m_pParent = nullptr;
 	m_pChild = nullptr;
 }
@@ -201,6 +202,10 @@ void CGameWorld::RemoveEntities()
 
 void CGameWorld::Tick()
 {
+	// Projectiles and other entities run before characters. Establish this
+	// world's perspective before any of them query the shared collision.
+	if(m_pCollision)
+		m_pCollision->SetEnvelopeTriggerContext(&m_EnvelopeTriggers, m_LocalClientId, m_LocalClientId >= 0 && m_LocalClientId < MAX_CLIENTS ? m_Teams.Team(m_LocalClientId) : 0, GameTick());
 	// Every cloned prediction world shares the client collision instance.
 	// Set its time before ANY entity runs, including rewinds/extra prediction.
 	if(m_pCollision)
@@ -677,6 +682,7 @@ void CGameWorld::CopyWorldClean(CGameWorld *pFrom)
 	m_IsValidCopy = false;
 
 	m_GameTick = pFrom->m_GameTick;
+	m_LocalClientId = pFrom->m_LocalClientId;
 	m_pCollision = pFrom->m_pCollision;
 	m_WorldConfig = pFrom->m_WorldConfig;
 	m_pTuningList = pFrom->m_pTuningList;
@@ -686,6 +692,7 @@ void CGameWorld::CopyWorldClean(CGameWorld *pFrom)
 	m_PredictedEvents = pFrom->m_PredictedEvents;
 	// delete the previous entities
 	Clear();
+	m_EnvelopeTriggers = pFrom->m_EnvelopeTriggers;
 	for(int i = 0; i < MAX_CLIENTS; i++)
 	{
 		m_apCharacters[i] = nullptr;
@@ -730,6 +737,7 @@ void CGameWorld::CopyWorld(CGameWorld *pFrom)
 	pFrom->m_pChild = this;
 
 	m_GameTick = pFrom->m_GameTick;
+	m_LocalClientId = pFrom->m_LocalClientId;
 	m_pCollision = pFrom->m_pCollision;
 	m_WorldConfig = pFrom->m_WorldConfig;
 	m_pTuningList = pFrom->m_pTuningList;
@@ -739,6 +747,7 @@ void CGameWorld::CopyWorld(CGameWorld *pFrom)
 	m_PredictedEvents = pFrom->m_PredictedEvents;
 	// delete the previous entities
 	Clear();
+	m_EnvelopeTriggers = pFrom->m_EnvelopeTriggers;
 	for(int i = 0; i < MAX_CLIENTS; i++)
 	{
 		m_apCharacters[i] = nullptr;
@@ -859,6 +868,9 @@ void CGameWorld::OnModified() const
 
 void CGameWorld::Clear()
 {
+	if(m_pCollision)
+		m_pCollision->SetEnvelopeTriggerContext(nullptr, -1, 0, 0);
+	m_EnvelopeTriggers = CEnvelopeTriggerRuntime();
 	// delete all entities
 	for(auto &pFirstEntityType : m_apFirstEntityTypes)
 		while(pFirstEntityType)

@@ -88,6 +88,7 @@ public:
 	int GetLastWeapon() const { return m_LastWeapon; }
 	void SetLastWeapon(int LastWeap) { m_LastWeapon = LastWeap; }
 	int GetActiveWeapon() const { return m_Core.m_ActiveWeapon; }
+	int GetReloadTimer() const { return m_ReloadTimer; }
 	void SetActiveWeapon(int ActiveWeapon);
 	CCharacterCore GetCore() { return m_Core; }
 	void SetCore(const CCharacterCore &Core) { m_Core = Core; }
@@ -185,6 +186,7 @@ private:
 
 	static bool IsSwitchActiveCb(unsigned char Number, void *pUser);
 	void HandleTiles(int Index);
+	int m_LastEnvelopeTriggerZone = -1;
 	void HandleSkippableTiles(int Index);
 	void DDRaceTick();
 	void DDRacePostCoreTick();

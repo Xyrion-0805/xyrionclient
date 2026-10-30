@@ -5,6 +5,8 @@
 #include <engine/graphics.h>
 #include <engine/shared/config.h>
 #include <game/client/gameclient.h>
+#include <game/client/QmUi/UiTheme.h>
+#include <game/client/QmUi/QmAnimResolve.h>
 
 #include <algorithm>
 #include <bit>
@@ -81,12 +83,16 @@ namespace
 	constexpr int TITLE_HEIGHT = 42;
 	constexpr int TOOLBAR_HEIGHT = 100;
 	constexpr int STATUS_HEIGHT = 26;
-	constexpr COLORREF SURFACE = RGB(19, 24, 35);
-	constexpr COLORREF ADDRESS = RGB(30, 38, 53);
-	constexpr COLORREF BORDER = RGB(49, 62, 81);
-	constexpr COLORREF TEXT = RGB(224, 233, 245);
-	constexpr COLORREF MUTED = RGB(137, 157, 181);
-	constexpr COLORREF ACCENT = RGB(94, 211, 237);
+	COLORREF NativeColor(ColorRGBA Color)
+	{
+		return RGB(round_to_int(std::clamp(Color.r, 0.0f, 1.0f) * 255), round_to_int(std::clamp(Color.g, 0.0f, 1.0f) * 255), round_to_int(std::clamp(Color.b, 0.0f, 1.0f) * 255));
+	}
+	COLORREF BlendNative(COLORREF From, COLORREF To, float Amount)
+	{
+		return RGB(round_to_int(GetRValue(From) + (GetRValue(To) - GetRValue(From)) * Amount),
+			round_to_int(GetGValue(From) + (GetGValue(To) - GetGValue(From)) * Amount),
+			round_to_int(GetBValue(From) + (GetBValue(To) - GetBValue(From)) * Amount));
+	}
 
 	void FillRounded(HDC Dc, const RECT &Rect, COLORREF Color, int Radius, COLORREF Outline)
 	{
@@ -144,96 +150,105 @@ class CWebBrowser::CImpl : public std::enable_shared_from_this<CImpl>
 	HFONT m_Font = nullptr, m_TitleFont = nullptr, m_SmallFont = nullptr;
 	HBRUSH m_AddressBrush = nullptr;
 	HWND m_Hovered = nullptr;
+	SUiTheme m_Theme;
+	COLORREF m_Surface = RGB(20, 20, 20), m_AddressColor = RGB(30, 30, 30), m_Border = RGB(50, 50, 50);
+	COLORREF m_Text = RGB(255, 255, 255), m_Muted = RGB(160, 160, 160), m_Accent = RGB(128, 128, 128);
+	float m_aHover[8]{}, m_aPress[8]{};
+	float m_GameControlAmount = 0, m_AddressFocus = 0;
 	int m_Dpi = 96;
 	bool m_Loading = false, m_NavigationFailed = false;
 	UINT m_LoadTick = 0;
 	bool m_GameControlEnabled = false;
 	bool m_Dragging = false;
+	int m_ResizeEdge = HTNOWHERE;
+	RECT m_ResizeOrigin{}, m_LastParentRect{};
+	bool m_LayoutDirty = false, m_PositionDirty = false;
+	bool m_AltHeld = false;
+	bool m_PendingBrowserFocus = false;
 	POINT m_DragOrigin{};
 	POINT m_WindowOrigin{};
 	HHOOK m_KeyboardHook = nullptr;
-	bool m_aForwardedKeys[SDL_NUM_SCANCODES]{};
 	bool m_ComInitialized = false;
 	bool m_Starting = false;
 	bool m_Stopped = false;
 	static CImpl *s_pHookTarget;
 
-	static SDL_Scancode ScancodeFromVirtualKey(DWORD Key)
-	{
-		if(Key >= 'A' && Key <= 'Z') return static_cast<SDL_Scancode>(SDL_SCANCODE_A + Key - 'A');
-		if(Key >= '1' && Key <= '9') return static_cast<SDL_Scancode>(SDL_SCANCODE_1 + Key - '1');
-		switch(Key)
-		{
-		case '0': return SDL_SCANCODE_0;
-		case VK_UP: return SDL_SCANCODE_UP;
-		case VK_DOWN: return SDL_SCANCODE_DOWN;
-		case VK_LEFT: return SDL_SCANCODE_LEFT;
-		case VK_RIGHT: return SDL_SCANCODE_RIGHT;
-		case VK_SPACE: return SDL_SCANCODE_SPACE;
-		case VK_SHIFT: return SDL_SCANCODE_LSHIFT;
-		case VK_CONTROL: return SDL_SCANCODE_LCTRL;
-		case VK_MENU: return SDL_SCANCODE_LALT;
-		case VK_TAB: return SDL_SCANCODE_TAB;
-		case VK_RETURN: return SDL_SCANCODE_RETURN;
-		case VK_BACK: return SDL_SCANCODE_BACKSPACE;
-		case VK_ESCAPE: return SDL_SCANCODE_ESCAPE;
-		default: return SDL_SCANCODE_UNKNOWN;
-		}
-	}
-
+	// Only reserve a bare Alt press while this client's browser is visible.
+	// Post focus changes out of the hook: WebView2 COM calls can dispatch messages.
 	static LRESULT CALLBACK KeyboardHookProc(int Code, WPARAM WParam, LPARAM LParam)
 	{
 		CImpl *pSelf = s_pHookTarget;
-		if(Code == HC_ACTION && pSelf && pSelf->m_GameControlEnabled && pSelf->m_Window && IsWindow(pSelf->m_Window) && pSelf->m_Parent && IsWindow(pSelf->m_Parent))
+		if(Code == HC_ACTION && pSelf && pSelf->m_Visible && GetAncestor(GetForegroundWindow(), GA_ROOT) == pSelf->m_Parent)
 		{
-			const HWND Foreground = GetAncestor(GetForegroundWindow(), GA_ROOT);
 			const auto *pKey = reinterpret_cast<const KBDLLHOOKSTRUCT *>(LParam);
-			const SDL_Scancode Scan = ScancodeFromVirtualKey(pKey->vkCode);
-			if(Foreground == pSelf->m_Parent && Scan != SDL_SCANCODE_UNKNOWN && pKey->vkCode != VK_F8 &&
-				(WParam == WM_KEYDOWN || WParam == WM_SYSKEYDOWN || WParam == WM_KEYUP || WParam == WM_SYSKEYUP))
+			if(pKey->vkCode == VK_LMENU || pKey->vkCode == VK_RMENU || pKey->vkCode == VK_MENU)
 			{
-				SDL_Event Event{};
-				Event.type = (WParam == WM_KEYDOWN || WParam == WM_SYSKEYDOWN) ? SDL_KEYDOWN : SDL_KEYUP;
-				Event.key.state = Event.type == SDL_KEYDOWN ? SDL_PRESSED : SDL_RELEASED;
-				Event.key.keysym.scancode = Scan;
-				Event.key.keysym.sym = SDL_GetKeyFromScancode(Scan);
-				Event.key.keysym.mod = SDL_GetModState();
-				SDL_PushEvent(&Event);
-				pSelf->m_aForwardedKeys[Scan] = Event.type == SDL_KEYDOWN;
+				const bool Down = WParam == WM_KEYDOWN || WParam == WM_SYSKEYDOWN;
+				if(Down && !pSelf->m_AltHeld && !(GetAsyncKeyState(VK_CONTROL) & 0x8000))
+					PostMessageW(pSelf->m_Window, WM_APP + 1, 0, 0);
+				pSelf->m_AltHeld = Down;
+				return 1;
 			}
 		}
 		return CallNextHookEx(pSelf ? pSelf->m_KeyboardHook : nullptr, Code, WParam, LParam);
 	}
 
+	void EnableAltHook()
+	{
+		if(m_KeyboardHook) return;
+		s_pHookTarget = this;
+		m_AltHeld = false;
+		m_KeyboardHook = SetWindowsHookExW(WH_KEYBOARD_LL, KeyboardHookProc, GetModuleHandleW(nullptr), 0);
+	}
+
+	void DisableAltHook()
+	{
+		if(m_KeyboardHook) UnhookWindowsHookEx(m_KeyboardHook);
+		m_KeyboardHook = nullptr;
+		m_AltHeld = false;
+		if(s_pHookTarget == this) s_pHookTarget = nullptr;
+	}
+
 	void SetGameControl(bool Enabled)
 	{
-		if(m_GameControlEnabled == Enabled) return;
 		m_GameControlEnabled = Enabled;
-		if(Enabled)
+		m_PendingBrowserFocus = !Enabled;
+		m_Dragging = false;
+		m_ResizeEdge = HTNOWHERE;
+		if(GetCapture() == m_Window) ReleaseCapture();
+		// A disabled child keeps rendering and playing media, but cannot take
+		// keyboard or mouse focus away from SDL until Alt is pressed again.
+		if(m_Window) EnableWindow(m_Window, !Enabled);
+		if(Enabled) SetFocus(m_Parent);
+		InvalidateChrome();
+	}
+
+	void UpdatePointerTransform()
+	{
+		if(!m_Dragging && m_ResizeEdge == HTNOWHERE) return;
+		POINT Cursor{}; GetCursorPos(&Cursor);
+		if(m_Dragging)
 		{
-			s_pHookTarget = this;
-			m_KeyboardHook = SetWindowsHookExW(WH_KEYBOARD_LL, KeyboardHookProc, GetModuleHandleW(nullptr), 0);
-			if(!m_KeyboardHook)
-			{
-				m_GameControlEnabled = false;
-				s_pHookTarget = nullptr;
-				log_error("browser", "could not enable game input: %lu", GetLastError());
-			}
+			POINT Position{m_WindowOrigin.x + Cursor.x - m_DragOrigin.x, m_WindowOrigin.y + Cursor.y - m_DragOrigin.y};
+			MapWindowPoints(nullptr, m_Parent, &Position, 1);
+			SetWindowPos(m_Window, nullptr, Position.x, Position.y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
 		}
 		else
 		{
-			if(m_KeyboardHook) UnhookWindowsHookEx(m_KeyboardHook);
-			m_KeyboardHook = nullptr;
-			if(s_pHookTarget == this) s_pHookTarget = nullptr;
-			for(int i = 0; i < SDL_NUM_SCANCODES; ++i)
-				if(m_aForwardedKeys[i])
-				{
-					SDL_Event Event{}; Event.type = SDL_KEYUP; Event.key.state = SDL_RELEASED;
-					Event.key.keysym.scancode = static_cast<SDL_Scancode>(i); Event.key.keysym.sym = SDL_GetKeyFromScancode(Event.key.keysym.scancode);
-					SDL_PushEvent(&Event); m_aForwardedKeys[i] = false;
-				}
+			RECT Rect = m_ResizeOrigin, Parent{};
+			GetClientRect(m_Parent, &Parent);
+			const int Dx = Cursor.x - m_DragOrigin.x, Dy = Cursor.y - m_DragOrigin.y;
+			const bool Left = m_ResizeEdge == HTLEFT || m_ResizeEdge == HTTOPLEFT || m_ResizeEdge == HTBOTTOMLEFT;
+			const bool Right = m_ResizeEdge == HTRIGHT || m_ResizeEdge == HTTOPRIGHT || m_ResizeEdge == HTBOTTOMRIGHT;
+			const bool Top = m_ResizeEdge == HTTOP || m_ResizeEdge == HTTOPLEFT || m_ResizeEdge == HTTOPRIGHT;
+			const bool Bottom = m_ResizeEdge == HTBOTTOM || m_ResizeEdge == HTBOTTOMLEFT || m_ResizeEdge == HTBOTTOMRIGHT;
+			if(Left) Rect.left = std::clamp(Rect.left + Dx, 0L, std::max(0L, Rect.right - Px(480)));
+			if(Right) Rect.right = std::clamp(Rect.right + Dx, std::min(Parent.right, Rect.left + Px(480)), Parent.right);
+			if(Top) Rect.top = std::clamp(Rect.top + Dy, 0L, std::max(0L, Rect.bottom - Px(300)));
+			if(Bottom) Rect.bottom = std::clamp(Rect.bottom + Dy, std::min(Parent.bottom, Rect.top + Px(300)), Parent.bottom);
+			SetWindowPos(m_Window, nullptr, Rect.left, Rect.top, Rect.right - Rect.left, Rect.bottom - Rect.top, SWP_NOZORDER | SWP_NOACTIVATE);
 		}
-		InvalidateChrome();
+		m_PositionDirty = true;
 	}
 	int Px(int Value) const { return MulDiv(Value, m_Dpi, 96); }
 
@@ -256,59 +271,75 @@ class CWebBrowser::CImpl : public std::enable_shared_from_this<CImpl>
 	void Paint(HDC Dc)
 	{
 		RECT Rect{}; GetClientRect(m_Window, &Rect);
-		const auto Brush = CreateSolidBrush(SURFACE);
+		const auto Brush = CreateSolidBrush(m_Surface);
 		FillRect(Dc, &Rect, Brush); DeleteObject(Brush);
-		FillRounded(Dc, {Px(14), Px(10), Px(36), Px(32)}, RGB(31, 66, 82), Px(10), RGB(43, 91, 109));
-		DrawTextLabel(Dc, m_TitleFont, ACCENT, {Px(14), Px(10), Px(36), Px(32)}, L"X", DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-		DrawTextLabel(Dc, m_TitleFont, TEXT, {Px(46), Px(5), Rect.right - Px(500), Px(38)}, L"Xyrion Browser");
+		FillRounded(Dc, {Px(14), Px(10), Px(36), Px(32)}, m_AddressColor, Px(22), m_AddressColor);
+		DrawTextLabel(Dc, m_TitleFont, m_Text, {Px(14), Px(10), Px(36), Px(32)}, L"X", DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+		DrawTextLabel(Dc, m_TitleFont, m_Text, {Px(46), Px(5), Rect.right - Px(352), Px(38)}, L"Xyrion 浏览器");
 		if(Rect.right > Px(760))
-			DrawTextLabel(Dc, m_SmallFont, MUTED, {Px(240), Px(5), Rect.right - Px(204), Px(38)}, L"浏览网页 · 随时回到游戏", DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+			DrawTextLabel(Dc, m_SmallFont, m_Muted, {Px(240), Px(5), Rect.right - Px(204), Px(38)}, L"浏览网页 · 随时回到游戏", DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
 		const RECT AddressBox = AddressRect();
-		const bool Focused = GetFocus() == m_Address;
-		FillRounded(Dc, AddressBox, ADDRESS, Px(14), Focused ? ACCENT : BORDER);
-		DrawTextLabel(Dc, m_SmallFont, MUTED, {AddressBox.left + Px(11), AddressBox.top, AddressBox.left + Px(48), AddressBox.bottom}, L"URL");
+		FillRounded(Dc, AddressBox, m_AddressColor, Px(36), BlendNative(m_Border, NativeColor(m_Theme.m_BorderFocused), m_AddressFocus));
+		FillRounded(Dc, {Px(12), Px(52), Px(124), Px(88)}, m_AddressColor, Px(36), m_AddressColor);
+		DrawTextLabel(Dc, m_SmallFont, m_Muted, {AddressBox.left + Px(11), AddressBox.top, AddressBox.left + Px(48), AddressBox.bottom}, L"URL");
 		const int StatusY = Rect.bottom - Px(STATUS_HEIGHT);
-		const auto Pen = CreatePen(PS_SOLID, 1, BORDER);
+		const auto Pen = CreatePen(PS_SOLID, 1, m_Border);
 		const auto OldPen = SelectObject(Dc, Pen);
 		MoveToEx(Dc, Px(1), Px(TOOLBAR_HEIGHT - 1), nullptr); LineTo(Dc, Rect.right - Px(1), Px(TOOLBAR_HEIGHT - 1));
 		MoveToEx(Dc, Px(1), StatusY, nullptr); LineTo(Dc, Rect.right - Px(1), StatusY);
 		SelectObject(Dc, OldPen); DeleteObject(Pen);
-		const COLORREF StatusColor = m_NavigationFailed ? RGB(247, 158, 135) : ACCENT;
+		const COLORREF StatusColor = m_NavigationFailed ? RGB(247, 158, 135) : m_Accent;
 		FillRounded(Dc, {Px(14), StatusY + Px(10), Px(20), StatusY + Px(16)}, StatusColor, Px(6), StatusColor);
-		DrawTextLabel(Dc, m_SmallFont, MUTED, {Px(28), StatusY, Rect.right - Px(175), Rect.bottom},
+		DrawTextLabel(Dc, m_SmallFont, m_Muted, {Px(28), StatusY, Rect.right - Px(175), Rect.bottom},
 			m_Starting ? L"正在启动浏览器…" : m_Loading ? L"正在加载网页…" : m_NavigationFailed ? L"网页加载失败，可刷新重试" : L"就绪");
-		DrawTextLabel(Dc, m_SmallFont, MUTED, {Rect.right - Px(168), StatusY, Rect.right - Px(14), Rect.bottom}, m_GameControlEnabled ? L"游戏按键同步已开" : L"F8  返回游戏", DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+		DrawTextLabel(Dc, m_SmallFont, m_Muted, {Rect.right - Px(168), StatusY, Rect.right - Px(14), Rect.bottom}, m_GameControlEnabled ? L"Alt  操作浏览器" : L"Alt  操作游戏", DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
 		if(m_Loading || m_Starting)
 		{
 			const int Width = std::max(1L, Rect.right - Px(2));
 			const int Segment = std::max(Px(40), Width / 5);
 			const int Left = static_cast<int>((m_LoadTick * Px(12)) % (Width + Segment)) - Segment;
 			RECT Progress{std::max(Px(1), Left), Px(TOOLBAR_HEIGHT - 2), std::min(Width, Left + Segment), Px(TOOLBAR_HEIGHT)};
-			const auto ProgressBrush = CreateSolidBrush(ACCENT); FillRect(Dc, &Progress, ProgressBrush); DeleteObject(ProgressBrush);
+			const auto ProgressBrush = CreateSolidBrush(m_Accent); FillRect(Dc, &Progress, ProgressBrush); DeleteObject(ProgressBrush);
 		}
-		const auto FrameBrush = CreateSolidBrush(BORDER); FrameRect(Dc, &Rect, FrameBrush); DeleteObject(FrameBrush);
+		const auto FrameBrush = CreateSolidBrush(m_Border); FrameRect(Dc, &Rect, FrameBrush); DeleteObject(FrameBrush);
 	}
 
 	void PaintButton(const DRAWITEMSTRUCT &Item)
 	{
 		const int Id = Item.CtlID;
-		const bool Hover = m_Hovered == Item.hwndItem;
-		const bool Down = (Item.itemState & ODS_SELECTED) != 0;
 		const bool Disabled = (Item.itemState & ODS_DISABLED) != 0;
 		const bool Primary = Id == 104;
 		const bool Close = Id == 107;
 		const bool GameControl = Id == 108;
-		const auto Brush = CreateSolidBrush(SURFACE); FillRect(Item.hDC, &Item.rcItem, Brush); DeleteObject(Brush);
+		const auto Brush = CreateSolidBrush(Id <= 103 ? m_AddressColor : m_Surface); FillRect(Item.hDC, &Item.rcItem, Brush); DeleteObject(Brush);
 		RECT Rect = Item.rcItem; InflateRect(&Rect, -Px(1), -Px(1));
-		const COLORREF Background = Primary ? (Down ? RGB(69, 167, 192) : Hover ? RGB(127, 227, 245) : ACCENT) :
-			GameControl && m_GameControlEnabled ? (Hover ? RGB(89, 226, 190) : RGB(49, 151, 125)) :
-			Close && Hover ? RGB(164, 61, 74) : Down ? RGB(49, 67, 86) : Hover ? RGB(37, 49, 67) : SURFACE;
-		FillRounded(Item.hDC, Rect, Background, Px(12), Primary ? Background : Hover ? BORDER : SURFACE);
-		const COLORREF Foreground = Disabled ? RGB(66, 80, 100) : (Primary || (GameControl && m_GameControlEnabled)) ? RGB(13, 35, 48) : TEXT;
+		const int Index = std::clamp(Id - 101, 0, 7);
+		const COLORREF Base = Id <= 103 ? m_AddressColor : m_Surface;
+		const ColorRGBA Surface = CompositeUiSurface(m_Theme.m_Surface);
+		const COLORREF Feedback = NativeColor(CompositeUiSurface(ResolveUiIconButtonFeedback(Surface, !Disabled, true, false), Surface));
+		COLORREF Background = BlendNative(Base, Feedback, m_aHover[Index]);
+		if(Primary)
+			Background = NativeColor(CompositeUiSurface(m_Theme.m_Selected.WithAlpha(0.42f), Surface));
+		if(Close)
+			Background = BlendNative(Base, RGB(133, 33, 33), m_aHover[Index]);
+		Background = BlendNative(Background, NativeColor(CompositeUiSurface(ResolveUiIconButtonFeedback(Surface, true, true, true), Surface)), m_aPress[Index] * 0.6f);
+		FillRounded(Item.hDC, Rect, Background, Px(36), Background);
+		const COLORREF Foreground = Disabled ? BlendNative(Base, m_Text, 0.35f) : m_Text;
+
 		if(Id == 104 || Id == 105 || GameControl)
 		{
-			const wchar_t *pLabel = Id == 104 ? L"前往  →" : Id == 105 ? L"返回游戏" : m_GameControlEnabled ? L"游戏操控  开" : L"游戏操控  关";
-			DrawTextLabel(Item.hDC, m_Font, Foreground, Rect, pLabel, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+			if(GameControl)
+			{
+				RECT Label = Rect; Label.right -= Px(44);
+				DrawTextLabel(Item.hDC, m_SmallFont, Foreground, Label, L"回到游戏", DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+				const RECT Track{Rect.right - Px(40), (Rect.top + Rect.bottom) / 2 - Px(8), Rect.right - Px(8), (Rect.top + Rect.bottom) / 2 + Px(8)};
+				const COLORREF TrackColor = BlendNative(m_Border, m_Accent, m_GameControlAmount);
+				FillRounded(Item.hDC, Track, TrackColor, Px(16), TrackColor);
+				const int X = Track.left + Px(2) + round_to_int(Px(16) * m_GameControlAmount);
+				FillRounded(Item.hDC, {X, Track.top + Px(2), X + Px(12), Track.bottom - Px(2)}, RGB(255,255,255), Px(12), RGB(255,255,255));
+			}
+			else
+				DrawTextLabel(Item.hDC, m_Font, Foreground, Rect, Id == 104 ? L"前往  →" : L"返回游戏", DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 		}
 		else
 		{
@@ -397,6 +428,23 @@ class CWebBrowser::CImpl : public std::enable_shared_from_this<CImpl>
 			if(Right) return HTRIGHT;
 			return HTCLIENT;
 		}
+		case WM_APP + 1:
+			pSelf->SetGameControl(!pSelf->m_GameControlEnabled);
+			return 0;
+		case WM_NCLBUTTONDOWN:
+			if(WParam >= HTLEFT && WParam <= HTBOTTOMRIGHT)
+			{
+				pSelf->m_ResizeEdge = static_cast<int>(WParam);
+				GetCursorPos(&pSelf->m_DragOrigin);
+				GetWindowRect(Window, &pSelf->m_ResizeOrigin);
+				MapWindowPoints(nullptr, pSelf->m_Parent, reinterpret_cast<POINT *>(&pSelf->m_ResizeOrigin), 2);
+				SetCapture(Window);
+				return 0; // Never enter DefWindowProc's blocking size/move loop.
+			}
+			break;
+		case WM_SYSCOMMAND:
+			if((WParam & 0xfff0) == SC_SIZE || (WParam & 0xfff0) == SC_MOVE) return 0;
+			break;
 		case WM_LBUTTONDOWN:
 		{
 			POINT Point{GET_X_LPARAM(LParam), GET_Y_LPARAM(LParam)};
@@ -409,20 +457,23 @@ class CWebBrowser::CImpl : public std::enable_shared_from_this<CImpl>
 			break;
 		}
 		case WM_MOUSEMOVE:
-			if(pSelf->m_Dragging)
-			{
-				POINT Cursor{}; GetCursorPos(&Cursor);
-				POINT Position{pSelf->m_WindowOrigin.x + Cursor.x - pSelf->m_DragOrigin.x, pSelf->m_WindowOrigin.y + Cursor.y - pSelf->m_DragOrigin.y};
-				MapWindowPoints(nullptr, pSelf->m_Parent, &Position, 1);
-				SetWindowPos(Window, nullptr, Position.x, Position.y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
-				return 0;
-			}
+			// Apply at most one geometry update per game frame.
+			if(pSelf->m_Dragging || pSelf->m_ResizeEdge != HTNOWHERE) return 0;
 			break;
 		case WM_LBUTTONUP:
-			if(pSelf->m_Dragging) { pSelf->m_Dragging = false; ReleaseCapture(); return 0; }
+			if(pSelf->m_Dragging || pSelf->m_ResizeEdge != HTNOWHERE)
+			{
+				pSelf->UpdatePointerTransform();
+				pSelf->m_Dragging = false;
+				pSelf->m_ResizeEdge = HTNOWHERE;
+				ReleaseCapture(); return 0;
+			}
 			break;
 		case WM_CAPTURECHANGED:
-			pSelf->m_Dragging = false; break;
+		case WM_CANCELMODE:
+			pSelf->m_Dragging = false;
+			pSelf->m_ResizeEdge = HTNOWHERE;
+			break;
 		case WM_ERASEBKGND:
 			return 1;
 		case WM_PAINT:
@@ -440,8 +491,8 @@ class CWebBrowser::CImpl : public std::enable_shared_from_this<CImpl>
 		case WM_DRAWITEM:
 			pSelf->PaintButton(*reinterpret_cast<DRAWITEMSTRUCT *>(LParam)); return TRUE;
 		case WM_CTLCOLOREDIT:
-			SetTextColor(reinterpret_cast<HDC>(WParam), TEXT);
-			SetBkColor(reinterpret_cast<HDC>(WParam), ADDRESS);
+			SetTextColor(reinterpret_cast<HDC>(WParam), pSelf->m_Text);
+			SetBkColor(reinterpret_cast<HDC>(WParam), pSelf->m_AddressColor);
 			return reinterpret_cast<LRESULT>(pSelf->m_AddressBrush);
 		case WM_TIMER:
 			if(WParam == 1 && (pSelf->m_Loading || pSelf->m_Starting)) { ++pSelf->m_LoadTick; pSelf->InvalidateChrome(); }
@@ -452,13 +503,17 @@ class CWebBrowser::CImpl : public std::enable_shared_from_this<CImpl>
 		case WM_GETMINMAXINFO:
 			reinterpret_cast<MINMAXINFO *>(LParam)->ptMinTrackSize = {pSelf->Px(480), pSelf->Px(300)};
 			return 0;
+		case WM_MOVE:
+			pSelf->m_PositionDirty = true;
+			return 0;
 		case WM_SIZE:
-			pSelf->Layout();
+			pSelf->m_LayoutDirty = true;
 			InvalidateRect(Window, nullptr, FALSE);
 			return 0;
 		case WM_COMMAND:
 			if(LOWORD(WParam) == 104) pSelf->Navigate();
-			else if(LOWORD(WParam) == 105 || LOWORD(WParam) == 107) pSelf->Hide();
+			else if(LOWORD(WParam) == 105) pSelf->SetGameControl(true);
+			else if(LOWORD(WParam) == 107) pSelf->Hide();
 			else if(LOWORD(WParam) == 106) ShowWindow(Window, SW_MINIMIZE);
 			else if(LOWORD(WParam) == 108) pSelf->SetGameControl(!pSelf->m_GameControlEnabled);
 			else if(pSelf->m_pWebView)
@@ -480,6 +535,8 @@ class CWebBrowser::CImpl : public std::enable_shared_from_this<CImpl>
 		if(!m_Window) return;
 		RECT Rect{};
 		GetClientRect(m_Window, &Rect);
+		// The native host uses the same rounded silhouette as Qm secondary panels.
+		SetWindowRgn(m_Window, CreateRoundRectRgn(0, 0, Rect.right + 1, Rect.bottom + 1, Px(20), Px(20)), TRUE);
 		for(int i = 0; i < 3; ++i) if(m_aButtons[i]) MoveWindow(m_aButtons[i], Px(12 + i * 39), Px(52), Px(34), Px(36), TRUE);
 		const RECT AddressBox = AddressRect();
 		if(m_Address) MoveWindow(m_Address, AddressBox.left + Px(48), AddressBox.top + Px(8), std::max(Px(20), static_cast<int>(AddressBox.right - AddressBox.left) - Px(60)), Px(22), TRUE);
@@ -488,6 +545,13 @@ class CWebBrowser::CImpl : public std::enable_shared_from_this<CImpl>
 		if(m_aButtons[5]) MoveWindow(m_aButtons[5], Rect.right - Px(86), Px(7), Px(32), Px(28), TRUE);
 		if(m_aButtons[6]) MoveWindow(m_aButtons[6], Rect.right - Px(46), Px(7), Px(32), Px(28), TRUE);
 		if(m_aButtons[7]) MoveWindow(m_aButtons[7], Rect.right - Px(338), Px(7), Px(145), Px(28), TRUE);
+		for(HWND Button : m_aButtons)
+			if(Button)
+			{
+				RECT Bounds{};
+				GetClientRect(Button, &Bounds);
+				SetWindowRgn(Button, CreateRoundRectRgn(0, 0, Bounds.right + 1, Bounds.bottom + 1, Bounds.bottom, Bounds.bottom), TRUE);
+			}
 		if(m_pController)
 		{
 			Rect.top = Px(TOOLBAR_HEIGHT); Rect.bottom = std::max(Rect.top, Rect.bottom - Px(STATUS_HEIGHT));
@@ -510,7 +574,7 @@ class CWebBrowser::CImpl : public std::enable_shared_from_this<CImpl>
 		m_Loading = true; m_NavigationFailed = false; InvalidateChrome();
 		SetWindowTextW(m_Address, windows_utf8_to_wide(Url.c_str()).c_str());
 		m_pWebView->Navigate(windows_utf8_to_wide(Url.c_str()).c_str());
-		m_pController->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
+		if(!m_GameControlEnabled) m_pController->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
 	}
 
 	void Fail(HRESULT Error)
@@ -524,11 +588,22 @@ class CWebBrowser::CImpl : public std::enable_shared_from_this<CImpl>
 
 public:
 	bool m_Visible = false;
+	bool Interactive() const { return m_Visible && !m_GameControlEnabled && !IsIconic(m_Window) && !IsIconic(m_Parent); }
+	void ApplyPendingFocus()
+	{
+		if(m_PendingBrowserFocus && Interactive() && m_pController && GetAncestor(GetForegroundWindow(), GA_ROOT) == m_Parent)
+		{
+			m_PendingBrowserFocus = false;
+			SetFocus(m_Window);
+			m_pController->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
+		}
+	}
 	std::string m_Error;
 
 	void Hide()
 	{
 		m_Visible = false;
+		DisableAltHook();
 		SetGameControl(false);
 		if(m_pController) m_pController->put_IsVisible(FALSE);
 		if(m_Window) ShowWindow(m_Window, SW_HIDE);
@@ -541,6 +616,8 @@ public:
 		if(m_Window)
 		{
 			m_Visible = true;
+			EnableAltHook();
+			SetGameControl(false);
 			ShowWindow(m_Window, SW_RESTORE);
 			if(m_pController) { m_pController->put_IsVisible(TRUE); m_pController->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC); }
 			return;
@@ -554,7 +631,7 @@ public:
 		m_Font = CreateFontW(-Px(14), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Microsoft YaHei UI");
 		m_TitleFont = CreateFontW(-Px(16), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
 		m_SmallFont = CreateFontW(-Px(12), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Microsoft YaHei UI");
-		m_AddressBrush = CreateSolidBrush(ADDRESS);
+		SyncTheme();
 		const HRESULT ComResult = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 		if(FAILED(ComResult)) { Fail(ComResult); return; }
 		m_ComInitialized = true;
@@ -600,6 +677,7 @@ public:
 		SendMessageW(m_Address, WM_SETFONT, reinterpret_cast<WPARAM>(m_Font), TRUE);
 		SetTimer(m_Window, 1, 40, nullptr);
 		m_Visible = true;
+		EnableAltHook();
 		m_Starting = true;
 		ShowWindow(m_Window, SW_SHOW);
 		Layout();
@@ -686,15 +764,67 @@ public:
 		if(FAILED(Started)) Fail(Started);
 	}
 
+	void SyncTheme()
+	{
+		m_Theme = ResolveUiTheme(ColorHSLA(g_Config.m_QmUiColor), g_Config.m_QmUiOpacity / 100.0f, ColorHSLA(g_Config.m_QmUiFocusColor), ColorHSLA(g_Config.m_QmUiAccentColor).WithAlpha(g_Config.m_QmUiAccentOpacity / 100.0f), ColorHSLA(g_Config.m_QmUiSelectedColor));
+		const ColorRGBA Surface = CompositeUiSurface(m_Theme.m_Surface);
+		m_Surface = NativeColor(Surface);
+		m_Text = NativeColor(m_Theme.m_TextBody);
+		m_Muted = NativeColor(CompositeUiSurface(m_Theme.m_TextSmall, Surface));
+		m_Border = NativeColor(CompositeUiSurface(m_Theme.m_Border, Surface));
+		m_Accent = NativeColor(CompositeUiSurface(m_Theme.m_Accent, Surface));
+		const COLORREF Address = NativeColor(CompositeUiSurface(m_Theme.m_InputSurface, Surface));
+		if(!m_AddressBrush || Address != m_AddressColor)
+		{
+			if(m_AddressBrush) DeleteObject(m_AddressBrush);
+			m_AddressColor = Address;
+			m_AddressBrush = CreateSolidBrush(Address);
+		}
+	}
+public:
+	void UpdateStyle(CUiV2AnimationRuntime &Runtime)
+	{
+		if(!m_Visible || !m_Window) return;
+		const COLORREF Previous[] = {m_Surface, m_Text, m_Muted, m_Border, m_Accent, m_AddressColor};
+		SyncTheme();
+		bool Changed = Previous[0] != m_Surface || Previous[1] != m_Text || Previous[2] != m_Muted || Previous[3] != m_Border || Previous[4] != m_Accent || Previous[5] != m_AddressColor;
+		const float Duration = g_Config.m_QmUiMotionLevel == 0 ? 0.0f : g_Config.m_QmUiMotionLevel == 1 ? 0.06f : 0.12f;
+		const auto Animate = [&](float &Value, uint64_t Id, float Target) {
+			const float Next = ResolveUiAnimValue(Runtime, BuildUiAnimNodeKey(str_quickhash("browser-qm"), Id), EUiAnimProperty::SCALE, Target, Duration, EEasing::EASE_OUT);
+			const bool Updated = std::abs(Next - Value) > 0.001f;
+			Value = Next;
+			return Updated;
+		};
+		Changed |= Animate(m_GameControlAmount, 1, m_GameControlEnabled ? 1.0f : 0.0f);
+		Changed |= Animate(m_AddressFocus, 2, GetFocus() == m_Address ? 1.0f : 0.0f);
+		for(int i = 0; i < 8; ++i)
+		{
+			const bool Enabled = IsWindowEnabled(m_aButtons[i]);
+			const bool Hover = Enabled && m_Hovered == m_aButtons[i];
+			const bool Down = Enabled && (SendMessageW(m_aButtons[i], BM_GETSTATE, 0, 0) & BST_PUSHED);
+			bool ButtonChanged = Animate(m_aHover[i], 10 + i, Hover ? 1.0f : 0.0f);
+			ButtonChanged |= Animate(m_aPress[i], 20 + i, Down ? 1.0f : 0.0f);
+			if(Changed || ButtonChanged) InvalidateRect(m_aButtons[i], nullptr, FALSE);
+		}
+		if(Changed)
+		{
+			InvalidateChrome();
+			InvalidateRect(m_Address, nullptr, FALSE);
+		}
+	}
 	void Update()
 	{
 		if(!m_Visible || !m_Window || !IsWindow(m_Window) || !m_Parent || !IsWindow(m_Parent)) return;
 		if(IsIconic(m_Parent))
 		{
-			SetGameControl(false);
+			m_Dragging = false;
+			m_ResizeEdge = HTNOWHERE;
+			if(GetCapture() == m_Window) ReleaseCapture();
 			return;
 		}
+		if(GetAncestor(GetForegroundWindow(), GA_ROOT) != m_Parent) m_AltHeld = false;
 		if(IsIconic(m_Window)) return;
+		UpdatePointerTransform();
 		RECT Rect{}, Parent{};
 		GetWindowRect(m_Window, &Rect);
 		MapWindowPoints(nullptr, m_Parent, reinterpret_cast<POINT *>(&Rect), 2);
@@ -707,12 +837,24 @@ public:
 			MoveWindow(m_Window, X, Y, Width, Height, TRUE);
 		g_Config.m_XcBrowserX = X; g_Config.m_XcBrowserY = Y;
 		g_Config.m_XcBrowserW = Width; g_Config.m_XcBrowserH = Height;
-		if(m_pController) m_pController->NotifyParentWindowPositionChanged();
+		if(m_LayoutDirty)
+		{
+			m_LayoutDirty = false;
+			Layout();
+		}
+		RECT ParentScreen{}; GetWindowRect(m_Parent, &ParentScreen);
+		if(!EqualRect(&ParentScreen, &m_LastParentRect)) { m_LastParentRect = ParentScreen; m_PositionDirty = true; }
+		if(m_PositionDirty && m_pController)
+		{
+			m_PositionDirty = false;
+			m_pController->NotifyParentWindowPositionChanged();
+		}
 	}
 
 	void Shutdown()
 	{
 		m_Stopped = true;
+		DisableAltHook();
 		SetGameControl(false);
 		if(m_pController) { m_pController->Close(); m_pController->Release(); m_pController = nullptr; }
 		if(m_pWebView) { m_pWebView->Release(); m_pWebView = nullptr; }
@@ -732,6 +874,8 @@ class CWebBrowser::CImpl
 public:
 	bool m_Visible = false;
 	std::string m_Error;
+	bool Interactive() const { return false; }
+	void ApplyPendingFocus() {}
 	void Show() { m_Error = "内置浏览器目前支持 Windows WebView2"; }
 	void Hide() { m_Visible = false; }
 	void Update() {}
@@ -765,6 +909,9 @@ void CWebBrowser::Toggle()
 void CWebBrowser::OnUpdate()
 {
 	if(!m_pImpl) return;
+#if defined(CONF_FAMILY_WINDOWS)
+	m_pImpl->UpdateStyle(GameClient()->UiRuntimeV2()->AnimRuntime());
+#endif
 	m_pImpl->Update();
 	const bool Failed = !m_pImpl->m_Error.empty();
 	if(Failed)
@@ -773,8 +920,21 @@ void CWebBrowser::OnUpdate()
 		Client()->AddWarning(SWarning("内置浏览器", m_pImpl->m_Error.c_str()));
 		m_pImpl->Shutdown();
 	}
-	if(m_pImpl->m_Visible) { Input()->MouseModeAbsolute(); Graphics()->SetWindowGrab(false); }
-	else if(m_WasVisible || m_RestoreFullscreen || Failed)
+	const bool Interactive = m_pImpl->Interactive();
+	if(Interactive != m_WasInteractive)
+	{
+		if(Interactive) GameClient()->m_TeeBalance.Stop("已切换到浏览器操作");
+		for(int Slot = 0; Slot < NUM_DUMMIES; ++Slot)
+		{
+			GameClient()->m_Controls.m_aLastData[Slot].m_Hook = 0;
+			GameClient()->m_Controls.ResetInput(Slot);
+		}
+		if(Interactive) { Input()->MouseModeAbsolute(); Graphics()->SetWindowGrab(false); }
+		else Input()->MouseModeRelative();
+		m_WasInteractive = Interactive;
+	}
+	if(Interactive) { Input()->MouseModeAbsolute(); Graphics()->SetWindowGrab(false); }
+	else if(!m_pImpl->m_Visible && (m_WasVisible || m_RestoreFullscreen || Failed))
 	{
 		if(m_RestoreFullscreen && g_Config.m_GfxFullscreen == 2) { g_Config.m_GfxFullscreen = 1; Graphics()->SetWindowParams(1, g_Config.m_GfxBorderless); }
 		m_RestoreFullscreen = false;
@@ -782,6 +942,7 @@ void CWebBrowser::OnUpdate()
 		Input()->MouseModeRelative();
 	}
 	m_WasVisible = m_pImpl->m_Visible;
+	if(!Failed) m_pImpl->ApplyPendingFocus();
 	if(Failed) m_pImpl.reset();
 }
 
@@ -790,4 +951,16 @@ void CWebBrowser::OnShutdown()
 	if(m_pImpl) { m_pImpl->Shutdown(); m_pImpl.reset(); }
 	if(m_RestoreFullscreen && g_Config.m_GfxFullscreen == 2) g_Config.m_GfxFullscreen = 1;
 	m_RestoreFullscreen = false;
+}
+
+bool CWebBrowser::OnInput(const IInput::CEvent &Event)
+{
+	if(!m_pImpl || !m_pImpl->Interactive()) return false;
+	if(Event.m_Key == KEY_F8 && (Event.m_Flags & IInput::FLAG_PRESS)) Toggle();
+	return true;
+}
+
+bool CWebBrowser::OnCursorMove(float, float, IInput::ECursorType)
+{
+	return m_pImpl && m_pImpl->Interactive();
 }
